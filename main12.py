@@ -390,9 +390,9 @@ class TelegramSpyBot:
                         await self.send_bot_message(chat_id,
                             "❌ <b>Неверный формат!</b>\n\n"
                             "Отправьте:\n"
-                            "• @username (например @durov)\n"
-                            "• ID пользователя (например 123456789)\n\n"
-                            "Или используйте команды: /start /help"
+                                "• @username (например @durov)\n"
+                                "• ID пользователя (например 123456789)\n\n"
+                                "Или используйте команды: /start /help"
                         )
         except Exception as e:
             print(f"Ошибка обработки команды: {e}")
@@ -541,31 +541,33 @@ class TelegramSpyBot:
             user = None
             user_input_clean = user_input.strip().replace('@', '')
             
+            # Улучшенный поиск по ID
             if user_input_clean.isdigit() or (user_input_clean.startswith('-') and user_input_clean[1:].isdigit()):
                 # Поиск по ID
                 user_id = int(user_input_clean)
                 try:
-                    user = await self.client.get_entity(user_id)
-                except Exception as e1:
-                    print(f"Попытка 1 поиска по ID {user_id} не удалась: {e1}")
+                    # Пробуем разные методы поиска
                     try:
                         user = await self.client.get_entity(PeerUser(user_id))
-                    except Exception as e2:
-                        print(f"Попытка 2 поиска по ID {user_id} не удалась: {e2}")
+                    except:
                         try:
-                            # Пробуем получить через InputPeerUser
-                            user = await self.client.get_entity(InputPeerUser(user_id=user_id, access_hash=0))
-                        except Exception as e3:
-                            print(f"Попытка 3 поиска по ID {user_id} не удалась: {e3}")
-                            await self.send_bot_message(chat_id, 
-                                f"❌ Пользователь с ID {user_id} не найден\n\n"
-                                f"Возможные причины:\n"
-                                f"1. Пользователь с таким ID не существует\n"
-                                f"2. Пользователь заблокировал бота\n"
-                                f"3. ID введен неправильно\n\n"
-                                f"Попробуйте поиск по @username"
-                            )
-                            return
+                            user = await self.client.get_entity(user_id)
+                        except:
+                            try:
+                                # Пробуем через InputPeerUser
+                                user = await self.client.get_entity(InputPeerUser(user_id, 0))
+                            except:
+                                try:
+                                    # Последняя попытка - через get_entity с id
+                                    user = await self.client.get_entity(int(user_id))
+                                except Exception as e:
+                                    print(f"Все методы поиска по ID не удались: {e}")
+                                    await self.send_bot_message(chat_id, f"❌ Пользователь с ID {user_id} не найден")
+                                    return
+                except Exception as e:
+                    print(f"Ошибка поиска по ID: {e}")
+                    await self.send_bot_message(chat_id, f"❌ Ошибка поиска пользователя: {str(e)[:100]}")
+                    return
             else:
                 # Поиск по username
                 username = user_input_clean
@@ -584,8 +586,6 @@ class TelegramSpyBot:
             if not user:
                 await self.send_bot_message(chat_id, "❌ Не удалось получить информацию о пользователе")
                 return
-            
-            print(f"✅ Найден пользователь: {user.id} - {getattr(user, 'first_name', '')}")
             
             # Получаем полную информацию
             try:
@@ -653,18 +653,16 @@ class TelegramSpyBot:
             error_msg = str(e)
             print(f"Ошибка поиска пользователя: {error_msg}")
             
-            if "Cannot cast" in error_msg or "InputPeer" in error_msg or "A wait of" in error_msg:
+            if "Cannot cast" in error_msg or "InputPeer" in error_msg:
                 await self.send_bot_message(chat_id,
-                    "❌ <b>Ошибка при поиске пользователя!</b>\n\n"
-                    "Попробуйте:\n"
-                    "1. Использовать @username вместо ID\n"
-                    "2. Проверить правильность ID\n"
-                    "3. Подождать и попробовать снова\n\n"
-                    "Пример корректного ввода:\n"
-                    "<code>@durov</code> или <code>123456789</code>"
+                    "❌ <b>Ошибка приведения типа!</b>\n\n"
+                    "Попробуйте другой формат:\n"
+                    "• @username (например @durov)\n"
+                    "• ID пользователя (только цифры)\n\n"
+                    "Или проверьте правильность ввода."
                 )
             else:
-                await self.send_bot_message(chat_id, f"❌ Ошибка: {error_msg[:200]}")
+                await self.send_bot_message(chat_id, f"❌ Ошибка: {error_msg[:100]}")
     
     async def load_user_chats(self, chat_id: int, user_id: int):
         """Быстро загружает чаты пользователя"""
@@ -1145,7 +1143,7 @@ class TelegramSpyBot:
     async def show_message_count(self, chat_id: int, user_id: int):
         """Показывает количество сообщений пользователя во всех чатах"""
         try:
-            await self.send_bot_message(chat_id, "📊 Запускаю глубокий анализ активности пользователя...")
+            await self.send_bot_message(chat_id, "📊 Подсчитываю количество сообщений...")
             
             # Получаем пользователя
             try:
@@ -1161,8 +1159,7 @@ class TelegramSpyBot:
                     "❌ Нет чатов для проверки!\n"
                     "Добавьте чаты в файл chats.txt\n\n"
                     "Пример содержимого файла:\n"
-                    "<code>@durov\n@telegram</code>\n"
-                    "<code>https://t.me/+tmE98W5NO6xlYmQy</code>"
+                    "<code>@durov\n@telegram</code>"
                 )
                 return
             
@@ -1170,89 +1167,66 @@ class TelegramSpyBot:
             chat_stats = []
             checked_chats = 0
             
-            # Отправляем стартовое сообщение
-            await self.send_bot_message(chat_id,
-                f"🚀 <b>НАЧИНАЮ АНАЛИЗ АКТИВНОСТИ</b>\n\n"
-                f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
-                f"📊 Всего чатов для проверки: {len(chats)}\n"
-                f"⏱ Ожидаемое время: {len(chats) // 20 + 1} минут\n\n"
-                f"<i>Анализирую историю сообщений...</i>"
-            )
-            
-            # Проверяем каждый чат пакетами по 20
-            for i in range(0, len(chats), 20):
-                batch = chats[i:min(i + 20, len(chats))]
-                batch_start = time.time()
-                
-                # Создаем задачи для параллельной обработки чатов
-                tasks = []
-                for chat_identifier in batch:
-                    task = asyncio.create_task(self.count_messages_in_chat(user, chat_identifier))
-                    tasks.append(task)
-                
-                # Ждем завершения всех задач
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Обрабатываем результаты
-                for result in results:
-                    if isinstance(result, Exception):
+            # Проверяем каждый чат
+            for i, chat_identifier in enumerate(chats, 1):
+                try:
+                    # УБРАНО ПРОГРЕСС-СООБЩЕНИЕ
+                    
+                    # Получаем чат
+                    chat = await self.get_chat_by_identifier(chat_identifier)
+                    if not chat:
                         continue
                     
-                    if result:
-                        chat_info, message_count = result
-                        if message_count > 0:
-                            total_messages += message_count
-                            chat_stats.append({
-                                "name": chat_info[:30],
-                                "count": message_count
-                            })
-                        checked_chats += 1
+                    checked_chats += 1
+                    
+                    # Получаем ВСЕ сообщения пользователя (без лимита)
+                    message_count = 0
+                    try:
+                        async for message in self.client.iter_messages(
+                            chat,
+                            from_user=user  # Без лимита - получаем все сообщения
+                        ):
+                            if message:
+                                message_count += 1
+                    except:
+                        # Если не удалось получить сообщения, пропускаем
+                        continue
+                    
+                    if message_count > 0:
+                        total_messages += message_count
+                        chat_name = getattr(chat, 'title', 
+                                          getattr(chat, 'username', 
+                                                 f'Чат {chat.id}'))
+                        
+                        chat_stats.append({
+                            "name": chat_name[:30],
+                            "count": message_count
+                        })
+                    
+                except Exception as e:
+                    print(f"Ошибка проверки чата {chat_identifier}: {e}")
+                    continue
                 
-                # Отправляем прогресс каждые 20 чатов
-                progress_percent = min(100, int((i + len(batch)) / len(chats) * 100))
-                batch_time = time.time() - batch_start
-                
-                progress_msg = (
-                    f"📡 <b>АНАЛИЗ В ПРОЦЕССЕ</b>\n\n"
-                    f"📊 Прогресс: {progress_percent}%\n"
-                    f"✅ Проверено чатов: {checked_chats}/{len(chats)}\n"
-                    f"💬 Найдено сообщений: {total_messages}\n"
-                    f"⚡ Скорость: {len(batch)/batch_time:.1f} чатов/сек\n"
-                    f"⏱ Осталось: {(len(chats) - checked_chats) / 15:.0f} секунд"
-                )
-                
-                await self.send_bot_message(chat_id, progress_msg)
-                
-                # Небольшая пауза между батчами для избежания ограничений
-                if i + 20 < len(chats):
-                    await asyncio.sleep(1)
+                # Небольшая пауза
+                await asyncio.sleep(0.1)
             
             # Сортируем по количеству сообщений
             chat_stats.sort(key=lambda x: x['count'], reverse=True)
             
-            # Формируем итоговый отчет
+            # Формируем отчет
             report_text = (
-                f"🏆 <b>АНАЛИЗ АКТИВНОСТИ ЗАВЕРШЕН!</b>\n\n"
+                f"📊 <b>СТАТИСТИКА СООБЩЕНИЙ:</b>\n\n"
                 f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
-                f"📈 Всего сообщений: <b>{total_messages}</b>\n"
+                f"📈 Всего сообщений: {total_messages}\n"
                 f"📁 Проверено чатов: {checked_chats} из {len(chats)}\n"
-                f"💬 Активных чатов: {len(chat_stats)}\n\n"
+                f"💬 Чатов с сообщениями: {len(chat_stats)}\n\n"
             )
             
             # Добавляем топ чатов
             if chat_stats:
-                report_text += f"📊 <b>ТОП-10 ЧАТОВ ПО АКТИВНОСТИ:</b>\n"
+                report_text += f"🏆 <b>Топ чатов по активности:</b>\n"
                 for i, stat in enumerate(chat_stats[:10], 1):
-                    report_text += f"{i}. {stat['name']}: <b>{stat['count']}</b> сообщ.\n"
-            
-            # Добавляем статистику
-            if chat_stats:
-                avg_per_chat = total_messages / len(chat_stats) if chat_stats else 0
-                max_chat = chat_stats[0]['count'] if chat_stats else 0
-                report_text += f"\n📈 <b>СТАТИСТИКА:</b>\n"
-                report_text += f"• Среднее в чате: {avg_per_chat:.1f} сообщ.\n"
-                report_text += f"• Максимум в чате: {max_chat} сообщ.\n"
-                report_text += f"• Медиана активности: {chat_stats[len(chat_stats)//2]['count'] if chat_stats else 0} сообщ.\n"
+                    report_text += f"{i}. {stat['name']}: {stat['count']} сообщ.\n"
             
             # Обновляем профиль
             if user_id in self.monitored_users:
@@ -1261,11 +1235,10 @@ class TelegramSpyBot:
             
             keyboard = self.create_keyboard([
                 [
-                    {"text": "🔍 Поиск сообщений", "callback_data": f"search_messages:{user_id}"},
-                    {"text": "📊 Детальный профиль", "callback_data": f"user_info:{user_id}"}
+                    {"text": "🔍 Найти сообщения", "callback_data": f"search_messages:{user_id}"},
+                    {"text": "📊 Профиль", "callback_data": f"user_info:{user_id}"}
                 ],
                 [
-                    {"text": "📁 Показать все чаты", "callback_data": f"show_user_chats:{user_id}:0"},
                     {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
                 ]
             ])
@@ -1274,39 +1247,7 @@ class TelegramSpyBot:
             
         except Exception as e:
             print(f"Ошибка подсчета сообщений: {e}")
-            await self.send_bot_message(chat_id, f"❌ Ошибка анализа: {str(e)[:100]}")
-    
-    async def count_messages_in_chat(self, user, chat_identifier):
-        """Подсчитывает сообщения пользователя в конкретном чате"""
-        try:
-            # Получаем чат
-            chat = await self.get_chat_by_identifier(chat_identifier)
-            if not chat:
-                return None
-            
-            # Получаем сообщения пользователя (ограничим 500 для скорости)
-            message_count = 0
-            try:
-                async for message in self.client.iter_messages(
-                    chat,
-                    limit=500,
-                    from_user=user
-                ):
-                    if message:
-                        message_count += 1
-            except:
-                # Если не удалось получить сообщения, возвращаем 0
-                message_count = 0
-            
-            chat_name = getattr(chat, 'title', 
-                              getattr(chat, 'username', 
-                                     f'Чат {chat.id}'))
-            
-            return (chat_name, message_count)
-            
-        except Exception as e:
-            print(f"Ошибка подсчета в чате {chat_identifier}: {e}")
-            return None
+            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
     
     async def get_user_statistics(self, user_id: int) -> Dict:
         """Получает статистику пользователя"""
@@ -1422,10 +1363,10 @@ class TelegramSpyBot:
         """Ищет сообщения пользователя"""
         try:
             await self.send_bot_message(chat_id, 
-                f"🔍 <b>ЗАПУСКАЮ ПОИСК СООБЩЕНИЙ</b>\n\n"
-                f"🔎 Искомый текст: '<code>{search_text}</code>'\n"
-                f"👤 Пользователь ID: <code>{user_id}</code>\n"
-                f"⏱ Начинаю сканирование чатов..."
+                f"🔎 <b>Ищу сообщения</b>\n\n"
+                f"👤 Пользователь: <code>{user_id}</code>\n"
+                f"📝 Текст: '{search_text}'\n\n"
+                f"<i>Поиск может занять некоторое время...</i>"
             )
             
             # Получаем пользователя
@@ -1442,125 +1383,106 @@ class TelegramSpyBot:
                     "❌ Нет чатов для поиска!\n"
                     "Добавьте чаты в файл chats.txt\n\n"
                     "Пример содержимого файла:\n"
-                    "<code>@durov\n@telegram</code>\n"
-                    "<code>https://t.me/+tmE98W5NO6xlYmQy</code>"
+                    "<code>@durov\n@telegram</code>"
                 )
                 return
             
             found_messages = []
             checked_chats = 0
             
-            # Отправляем стартовое сообщение
-            await self.send_bot_message(chat_id,
-                f"🚀 <b>СКАНИРУЮ ИСТОРИЮ СООБЩЕНИЙ</b>\n\n"
-                f"📊 Всего чатов для сканирования: {len(chats)}\n"
-                f"🔍 Искомый текст: '{search_text}'\n"
-                f"⏱ Ожидаемое время: {len(chats) // 15 + 1} минут\n\n"
-                f"<i>Начинаю глубокий поиск...</i>"
-            )
-            
-            # Ищем в каждом чате пакетами по 15
-            for i in range(0, len(chats), 15):
-                batch = chats[i:min(i + 15, len(chats))]
-                batch_start = time.time()
-                
-                # Создаем задачи для параллельного поиска
-                tasks = []
-                for chat_identifier in batch:
-                    task = asyncio.create_task(self.search_in_chat(user, chat_identifier, search_text))
-                    tasks.append(task)
-                
-                # Ждем завершения всех задач
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Обрабатываем результаты
-                for result in results:
-                    if isinstance(result, Exception):
+            # Ищем в каждом чате
+            for i, chat_identifier in enumerate(chats, 1):
+                try:
+                    # Получаем чат
+                    chat = await self.get_chat_by_identifier(chat_identifier)
+                    if not chat:
                         continue
                     
-                    if result:
-                        chat_found_messages = result
-                        if chat_found_messages:
-                            found_messages.extend(chat_found_messages)
-                        checked_chats += 1
+                    checked_chats += 1
+                    
+                    # Ищем ВСЕ сообщения пользователя (без лимита)
+                    async for message in self.client.iter_messages(
+                        chat,
+                        from_user=user  # Без лимита - получаем все сообщения
+                    ):
+                        if message and message.text and search_text.lower() in message.text.lower():
+                            # Формируем ссылку
+                            link = await self.get_message_link(chat, message.id)
+                            
+                            chat_name = getattr(chat, 'title', 
+                                              getattr(chat, 'username', 
+                                                     f'Чат {chat.id}'))
+                            
+                            found_messages.append({
+                                "chat": chat_name,
+                                "text": message.text[:150] + "..." if len(message.text) > 150 else message.text,
+                                "date": message.date.strftime("%d.%m.%Y %H:%M"),
+                                "link": link,
+                                "chat_id": chat.id,
+                                "message_id": message.id
+                            })
+                            
+                            # Отправляем сразу если нашли (первые 5 сразу)
+                            if len(found_messages) <= 5:
+                                msg_text = (
+                                    f"💬 <b>Найдено сообщение:</b>\n\n"
+                                    f"📌 Чат: {found_messages[-1]['chat']}\n"
+                                    f"📅 Дата: {found_messages[-1]['date']}\n"
+                                    f"📝 Текст: {found_messages[-1]['text']}\n"
+                                    f"🔗 Ссылка: {found_messages[-1]['link']}"
+                                )
+                                await self.send_bot_message(chat_id, msg_text)
                 
-                # Отправляем прогресс каждые 15 чатов
-                progress_percent = min(100, int((i + len(batch)) / len(chats) * 100))
-                batch_time = time.time() - batch_start
+                except Exception as e:
+                    print(f"Ошибка поиска в чате {chat_identifier}: {e}")
+                    continue
                 
-                progress_msg = (
-                    f"📡 <b>ПОИСК В ПРОЦЕССЕ</b>\n\n"
-                    f"📊 Прогресс: {progress_percent}%\n"
-                    f"✅ Проверено чатов: {checked_chats}/{len(chats)}\n"
-                    f"💬 Найдено сообщений: {len(found_messages)}\n"
-                    f"⚡ Скорость: {len(batch)/batch_time:.1f} чатов/сек\n"
-                    f"⏱ Осталось: {(len(chats) - checked_chats) / 12:.0f} секунд\n\n"
-                    f"<i>Продолжаю сканирование...</i>"
+                # Небольшая пауза
+                await asyncio.sleep(0.3)
+            
+            # Итоговый отчет
+            if found_messages:
+                total_text = (
+                    f"✅ <b>Поиск завершен!</b>\n\n"
+                    f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
+                    f"🔍 Текст: '{search_text}'\n"
+                    f"📊 Найдено сообщений: {len(found_messages)}\n"
+                    f"📁 Проверено чатов: {checked_chats} из {len(chats)}\n\n"
+                    f"<i>Первые результаты отправлены выше ↑</i>"
                 )
                 
-                await self.send_bot_message(chat_id, progress_msg)
-                
-                # Отправляем найденные сообщения если их много
-                if len(found_messages) <= 10 and found_messages:
-                    for msg in found_messages[-min(3, len(found_messages)):]:
+                # Если нашли больше 5, отправляем еще результаты
+                if len(found_messages) > 5:
+                    remaining = found_messages[5:min(15, len(found_messages))]
+                    for msg in remaining:
                         msg_text = (
-                            f"💬 <b>НАЙДЕНО:</b>\n\n"
+                            f"💬 <b>Еще найдено:</b>\n\n"
                             f"📌 Чат: {msg['chat']}\n"
                             f"📅 Дата: {msg['date']}\n"
                             f"📝 Текст: {msg['text']}\n"
                             f"🔗 Ссылка: {msg['link']}"
                         )
                         await self.send_bot_message(chat_id, msg_text)
-                
-                # Небольшая пауза между батчами
-                if i + 15 < len(chats):
-                    await asyncio.sleep(1)
-            
-            # Итоговый отчет
-            if found_messages:
-                total_text = (
-                    f"🏆 <b>ПОИСК ЗАВЕРШЕН УСПЕШНО!</b>\n\n"
-                    f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
-                    f"🔍 Искомый текст: '{search_text}'\n"
-                    f"📊 Найдено сообщений: <b>{len(found_messages)}</b>\n"
-                    f"📁 Проверено чатов: {checked_chats} из {len(chats)}\n"
-                    f"⏱ Время поиска: {time.time() - batch_start:.0f} секунд\n\n"
-                )
-                
-                # Добавляем статистику по чатам
-                chat_stats = {}
-                for msg in found_messages:
-                    chat_name = msg['chat']
-                    chat_stats[chat_name] = chat_stats.get(chat_name, 0) + 1
-                
-                if chat_stats:
-                    total_text += f"📊 <b>РАСПРЕДЕЛЕНИЕ ПО ЧАТАМ:</b>\n"
-                    sorted_chats = sorted(chat_stats.items(), key=lambda x: x[1], reverse=True)[:5]
-                    for chat_name, count in sorted_chats:
-                        total_text += f"• {chat_name[:25]}: {count} сообщ.\n"
-                
-                # Отправляем оставшиеся результаты
-                if len(found_messages) > 10:
-                    total_text += f"\n📄 <b>ПОКАЗАНО: 10 из {len(found_messages)}</b>\n"
-                    if len(found_messages) > 20:
-                        total_text += f"<i>Остальные результаты можно просмотреть в истории чата</i>"
+                    
+                    if len(found_messages) > 15:
+                        await self.send_bot_message(chat_id,
+                            f"📄 <b>И еще {len(found_messages) - 15} сообщений...</b>\n"
+                            f"Всего найдено: {len(found_messages)}"
+                        )
             else:
                 total_text = (
-                    f"❌ <b>СООБЩЕНИЙ НЕ НАЙДЕНО</b>\n\n"
+                    f"❌ <b>Сообщений не найдено</b>\n\n"
                     f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
-                    f"🔍 Искомый текст: '{search_text}'\n"
-                    f"📁 Проверено чатов: {checked_chats} из {len(chats)}\n"
-                    f"⏱ Время поиска: {time.time() - batch_start:.0f} секунд\n\n"
-                    f"<i>Попробуйте изменить поисковый запрос или проверьте другие чаты</i>"
+                    f"🔍 Текст: '{search_text}'\n"
+                    f"📁 Проверено чатов: {checked_chats} из {len(chats)}"
                 )
             
             keyboard = self.create_keyboard([
                 [
                     {"text": "🔍 Новый поиск", "callback_data": f"search_messages:{user_id}"},
-                    {"text": "📊 Полная статистика", "callback_data": f"user_info:{user_id}"}
+                    {"text": "📊 Информация", "callback_data": f"user_info:{user_id}"}
                 ],
                 [
-                    {"text": "📁 Чаты пользователя", "callback_data": f"show_user_chats:{user_id}:0"},
                     {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
                 ]
             ])
@@ -1570,45 +1492,6 @@ class TelegramSpyBot:
         except Exception as e:
             print(f"Ошибка поиска сообщений: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка поиска: {str(e)[:100]}")
-    
-    async def search_in_chat(self, user, chat_identifier, search_text):
-        """Ищет сообщения в конкретном чате"""
-        try:
-            # Получаем чат
-            chat = await self.get_chat_by_identifier(chat_identifier)
-            if not chat:
-                return []
-            
-            found_messages = []
-            
-            # Ищем сообщения (ограничим 300 сообщений на чат для скорости)
-            async for message in self.client.iter_messages(
-                chat,
-                limit=300,
-                from_user=user
-            ):
-                if message and message.text and search_text.lower() in message.text.lower():
-                    # Формируем ссылку
-                    link = await self.get_message_link(chat, message.id)
-                    
-                    chat_name = getattr(chat, 'title', 
-                                      getattr(chat, 'username', 
-                                             f'Чат {chat.id}'))
-                    
-                    found_messages.append({
-                        "chat": chat_name,
-                        "text": message.text[:150] + "..." if len(message.text) > 150 else message.text,
-                        "date": message.date.strftime("%d.%m.%Y %H:%M"),
-                        "link": link,
-                        "chat_id": chat.id,
-                        "message_id": message.id
-                    })
-            
-            return found_messages
-            
-        except Exception as e:
-            print(f"Ошибка поиска в чате {chat_identifier}: {e}")
-            return []
     
     async def toggle_message_monitoring(self, chat_id: int, user_id: int):
         """Включает/выключает отслеживание сообщений"""
@@ -2154,10 +2037,10 @@ class TelegramSpyBot:
         """Ищет ответы от конкретного пользователя нашему пользователю"""
         try:
             await self.send_bot_message(chat_id, 
-                f"🔍 <b>ЗАПУСКАЮ ПОИСК ОТВЕТОВ</b>\n\n"
-                f"👤 Ищу кто отвечает: '{target_user_input}'\n"
-                f"👤 Наш пользователь ID: <code>{user_id}</code>\n"
-                f"⏱ Начинаю сканирование чатов..."
+                f"🔎 <b>Ищу ответы от пользователя</b>\n\n"
+                f"👤 Наш пользователь: <code>{user_id}</code>\n"
+                f"👥 Целевой пользователь: '{target_user_input}'\n\n"
+                f"<i>Поиск может занять некоторое время...</i>"
             )
             
             # Получаем нашего пользователя
@@ -2175,12 +2058,10 @@ class TelegramSpyBot:
                 target_user_id = int(target_user_input_clean)
                 try:
                     target_user = await self.client.get_entity(target_user_id)
-                except Exception as e1:
-                    print(f"Попытка 1 поиска по ID {target_user_id} не удалась: {e1}")
+                except:
                     try:
                         target_user = await self.client.get_entity(PeerUser(target_user_id))
-                    except Exception as e2:
-                        print(f"Попытка 2 поиска по ID {target_user_id} не удалась: {e2}")
+                    except:
                         await self.send_bot_message(chat_id, f"❌ Пользователь с ID {target_user_id} не найден")
                         return
             else:
@@ -2210,82 +2091,106 @@ class TelegramSpyBot:
                     "❌ Нет чатов для поиска!\n"
                     "Добавьте чаты в файл chats.txt\n\n"
                     "Пример содержимого файла:\n"
-                    "<code>@durov\n@telegram</code>\n"
-                    "<code>https://t.me/+tmE98W5NO6xlYmQy</code>"
+                    "<code>@durov\n@telegram</code>"
                 )
                 return
             
             found_replies = []
             checked_chats = 0
-            start_date = datetime.now() - timedelta(days=30)  # Последние 30 дней
             
-            # Отправляем стартовое сообщение
-            await self.send_bot_message(chat_id,
-                f"🚀 <b>СКАНИРУЮ ИСТОРИЮ ОТВЕТОВ</b>\n\n"
-                f"👤 Ищу ответы от: {target_user.first_name if hasattr(target_user, 'first_name') else 'ID: ' + str(target_user.id)}\n"
-                f"👤 Наш пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
-                f"📊 Всего чатов для сканирования: {len(chats)}\n"
-                f"⏱ Ожидаемое время: {len(chats) // 10 + 1} минут\n\n"
-                f"<i>Начинаю глубокий поиск ответов...</i>"
-            )
-            
-            # Ищем в каждом чате пакетами по 10
-            for i in range(0, len(chats), 10):
-                batch = chats[i:min(i + 10, len(chats))]
-                batch_start = time.time()
-                
-                # Создаем задачи для параллельного поиска
-                tasks = []
-                for chat_identifier in batch:
-                    task = asyncio.create_task(self.search_replies_in_chat(user, target_user, chat_identifier, start_date, "to"))
-                    tasks.append(task)
-                
-                # Ждем завершения всех задач
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Обрабатываем результаты
-                for result in results:
-                    if isinstance(result, Exception):
+            # Ищем в каждом чате
+            for i, chat_identifier in enumerate(chats, 1):
+                try:
+                    # Получаем чат
+                    chat = await self.get_chat_by_identifier(chat_identifier)
+                    if not chat:
                         continue
                     
-                    if result:
-                        chat_found_replies = result
-                        if chat_found_replies:
-                            found_replies.extend(chat_found_replies)
-                        checked_chats += 1
+                    checked_chats += 1
+                    
+                    # Получаем ВСЕ сообщения нашего пользователя в этом чате (без лимита)
+                    user_messages = []
+                    async for message in self.client.iter_messages(
+                        chat,
+                        from_user=user  # Без лимита
+                    ):
+                        if message:
+                            user_messages.append(message)
+                    
+                    # Проверяем ответы на каждое сообщение
+                    for user_msg in user_messages:
+                        try:
+                            # Получаем ответы на это сообщение
+                            # Используем iter_messages без лимита для поиска реплаев
+                            async for reply in self.client.iter_messages(
+                                chat,
+                                min_id=user_msg.id - 1,
+                                limit=None  # Без лимита
+                            ):
+                                if (reply and reply.reply_to and 
+                                    reply.reply_to.reply_to_msg_id == user_msg.id and
+                                    hasattr(reply, 'from_id') and reply.from_id):
+                                    
+                                    # Проверяем отправителя
+                                    try:
+                                        reply_sender = await self.client.get_entity(reply.from_id)
+                                        
+                                        # Если это наш целевой пользователь
+                                        if reply_sender.id == target_user.id:
+                                            # Получаем информацию об авторе
+                                            sender_name = getattr(reply_sender, 'first_name', '')
+                                            if hasattr(reply_sender, 'last_name') and reply_sender.last_name:
+                                                sender_name += f" {reply_sender.last_name}"
+                                            if hasattr(reply_sender, 'username') and reply_sender.username:
+                                                sender_name += f" (@{reply_sender.username})"
+                                            
+                                            # Формируем ссылки
+                                            reply_link = await self.get_message_link(chat, reply.id)
+                                            original_link = await self.get_message_link(chat, user_msg.id)
+                                            chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
+                                            
+                                            found_replies.append({
+                                                "chat": chat_name,
+                                                "original_text": user_msg.text[:100] if user_msg.text else "без текста",
+                                                "reply_text": reply.text[:100] if reply.text else "без текста",
+                                                "replier": sender_name or f"User {target_user.id}",
+                                                "reply_time": reply.date.strftime("%d.%m.%Y %H:%M"),
+                                                "reply_link": reply_link,
+                                                "original_link": original_link,
+                                                "chat_id": chat.id,
+                                                "message_id": user_msg.id,
+                                                "reply_id": reply.id
+                                            })
+                                            
+                                            # Отправляем сразу если нашли (первые 3 сразу)
+                                            if len(found_replies) <= 3:
+                                                reply_info = (
+                                                    f"💬 <b>Найден ответ от {sender_name}:</b>\n\n"
+                                                    f"👤 Наш пользователь: {user.first_name}\n"
+                                                    f"💬 Чат: {chat_name[:50]}\n"
+                                                    f"📅 Время: {reply.date.strftime('%H:%M')}\n"
+                                                    f"📝 Оригинал: {user_msg.text[:150] if user_msg.text else 'нет текста'}\n"
+                                                    f"📝 Ответ: {reply.text[:150] if reply.text else 'нет текста'}\n"
+                                                    f"🔗 Ответ: {reply_link}\n"
+                                                    f"🔗 Оригинал: {original_link}"
+                                                )
+                                                await self.send_bot_message(chat_id, reply_info)
+                                            
+                                            break  # Нашли ответ от целевого пользователя
+                                            
+                                    except:
+                                        continue
+                                    
+                        except Exception as e:
+                            print(f"Ошибка проверки ответов на сообщение {user_msg.id}: {e}")
+                            continue
+                    
+                except Exception as e:
+                    print(f"Ошибка поиска в чате {chat_identifier}: {e}")
+                    continue
                 
-                # Отправляем прогресс каждые 10 чатов
-                progress_percent = min(100, int((i + len(batch)) / len(chats) * 100))
-                batch_time = time.time() - batch_start
-                
-                progress_msg = (
-                    f"📡 <b>ПОИСК ОТВЕТОВ В ПРОЦЕССЕ</b>\n\n"
-                    f"📊 Прогресс: {progress_percent}%\n"
-                    f"✅ Проверено чатов: {checked_chats}/{len(chats)}\n"
-                    f"💬 Найдено ответов: {len(found_replies)}\n"
-                    f"⚡ Скорость: {len(batch)/batch_time:.1f} чатов/сек\n"
-                    f"⏱ Осталось: {(len(chats) - checked_chats) / 8:.0f} секунд\n\n"
-                    f"<i>Анализирую взаимодействия...</i>"
-                )
-                
-                await self.send_bot_message(chat_id, progress_msg)
-                
-                # Отправляем найденные ответы если их мало
-                if len(found_replies) <= 5 and found_replies:
-                    for reply in found_replies[-min(2, len(found_replies)):]:
-                        reply_info = (
-                            f"💬 <b>НАЙДЕН ОТВЕТ:</b>\n\n"
-                            f"👤 От: {reply['replier']}\n"
-                            f"💬 Чат: {reply['chat'][:30]}\n"
-                            f"📅 Время: {reply['reply_time']}\n"
-                            f"📝 Ответ: {reply['reply_text']}\n"
-                            f"🔗 Ответ: {reply['reply_link']}"
-                        )
-                        await self.send_bot_message(chat_id, reply_info)
-                
-                # Пауза между батчами
-                if i + 10 < len(chats):
-                    await asyncio.sleep(1)
+                # Пауза между чатами
+                await asyncio.sleep(0.3)
             
             # Итоговый отчет
             if found_replies:
@@ -2297,33 +2202,34 @@ class TelegramSpyBot:
                     target_name += f" (@{target_user.username})"
                 
                 total_text = (
-                    f"🏆 <b>ПОИСК ОТВЕТОВ ЗАВЕРШЕН!</b>\n\n"
+                    f"✅ <b>Поиск завершен!</b>\n\n"
                     f"👤 Наш пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
                     f"👥 Целевой пользователь: {target_name}\n"
                     f"🆔 ID целевого: <code>{target_user.id}</code>\n"
-                    f"📊 Найдено ответов: <b>{len(found_replies)}</b>\n"
+                    f"📊 Найдено ответов: {len(found_replies)}\n"
                     f"📁 Проверено чатов: {checked_chats} из {len(chats)}\n"
-                    f"⏳ Период: последние 30 дней\n"
-                    f"⏱ Время поиска: {time.time() - batch_start:.0f} секунд\n\n"
+                    f"⏳ Период: все сообщения\n\n"
+                    f"<i>Первые результаты отправлены выше ↑</i>"
                 )
                 
-                # Добавляем статистику по чатам
-                chat_stats = {}
-                for reply in found_replies:
-                    chat_name = reply['chat']
-                    chat_stats[chat_name] = chat_stats.get(chat_name, 0) + 1
-                
-                if chat_stats:
-                    total_text += f"📊 <b>РАСПРЕДЕЛЕНИЕ ПО ЧАТАМ:</b>\n"
-                    sorted_chats = sorted(chat_stats.items(), key=lambda x: x[1], reverse=True)[:3]
-                    for chat_name, count in sorted_chats:
-                        total_text += f"• {chat_name[:20]}: {count} ответов\n"
-                
-                # Отправляем оставшиеся результаты
-                if len(found_replies) > 5:
-                    total_text += f"\n📄 <b>ПОКАЗАНО: 5 из {len(found_replies)}</b>\n"
-                    if len(found_replies) > 10:
-                        total_text += f"<i>Остальные результаты можно просмотреть в истории чата</i>"
+                # Если нашли больше 3, отправляем еще результаты
+                if len(found_replies) > 3:
+                    remaining = found_replies[3:min(8, len(found_replies))]
+                    for reply in remaining:
+                        reply_info = (
+                            f"💬 <b>Еще ответ от {target_name}:</b>\n\n"
+                            f"💬 Чат: {reply['chat'][:50]}\n"
+                            f"📅 Время: {reply['reply_time']}\n"
+                            f"📝 Ответ: {reply['reply_text']}\n"
+                            f"🔗 Ответ: {reply['reply_link']}"
+                        )
+                        await self.send_bot_message(chat_id, reply_info)
+                    
+                    if len(found_replies) > 8:
+                        await self.send_bot_message(chat_id,
+                            f"📄 <b>И еще {len(found_replies) - 8} ответов...</b>\n"
+                            f"Всего найдено: {len(found_replies)}"
+                        )
             else:
                 # Получаем информацию о целевом пользователе
                 target_name = getattr(target_user, 'first_name', '')
@@ -2333,23 +2239,21 @@ class TelegramSpyBot:
                     target_name += f" (@{target_user.username})"
                 
                 total_text = (
-                    f"❌ <b>ОТВЕТЫ НЕ НАЙДЕНЫ</b>\n\n"
+                    f"❌ <b>Ответы не найдены</b>\n\n"
                     f"👤 Наш пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
                     f"👥 Целевой пользователь: {target_name}\n"
                     f"🆔 ID целевого: <code>{target_user.id}</code>\n"
                     f"📁 Проверено чатов: {checked_chats} из {len(chats)}\n"
-                    f"⏳ Период: последние 30 дней\n"
-                    f"⏱ Время поиска: {time.time() - batch_start:.0f} секунд\n\n"
-                    f"<i>Пользователь {target_name} не отвечал на сообщения нашего пользователя за последние 30 дней</i>"
+                    f"⏳ Период: все сообщения\n\n"
+                    f"<i>Пользователь {target_name} не отвечал на сообщения нашего пользователя</i>"
                 )
             
             keyboard = self.create_keyboard([
                 [
                     {"text": "🔍 Новый поиск", "callback_data": f"search_replies_to:{user_id}"},
-                    {"text": "📊 Полная статистика", "callback_data": f"user_info:{user_id}"}
+                    {"text": "📊 Профиль", "callback_data": f"user_info:{user_id}"}
                 ],
                 [
-                    {"text": "💬 Анализ ответов", "callback_data": f"show_replies:{user_id}"},
                     {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
                 ]
             ])
@@ -2360,147 +2264,14 @@ class TelegramSpyBot:
             print(f"Ошибка поиска ответов от пользователя: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка поиска: {str(e)[:100]}")
     
-    async def search_replies_in_chat(self, user, target_user, chat_identifier, start_date, direction):
-        """Ищет реплаи в конкретном чате"""
-        try:
-            # Получаем чат
-            chat = await self.get_chat_by_identifier(chat_identifier)
-            if not chat:
-                return []
-            
-            found_replies = []
-            
-            if direction == "to":
-                # Получаем сообщения пользователя за последние 30 дней
-                user_messages = []
-                async for message in self.client.iter_messages(
-                    chat,
-                    limit=100,
-                    from_user=user,
-                    offset_date=start_date
-                ):
-                    if message:
-                        user_messages.append(message)
-                
-                # Проверяем ответы на каждое сообщение
-                for user_msg in user_messages:
-                    try:
-                        # Получаем ответы на это сообщение
-                        async for reply in self.client.iter_messages(
-                            chat,
-                            limit=10,
-                            min_id=user_msg.id - 1
-                        ):
-                            if (reply and reply.reply_to and 
-                                reply.reply_to.reply_to_msg_id == user_msg.id and
-                                hasattr(reply, 'from_id') and reply.from_id):
-                                
-                                # Проверяем отправителя
-                                try:
-                                    reply_sender = await self.client.get_entity(reply.from_id)
-                                    
-                                    # Если это наш целевой пользователь
-                                    if reply_sender.id == target_user.id:
-                                        # Получаем информацию об авторе
-                                        sender_name = getattr(reply_sender, 'first_name', '')
-                                        if hasattr(reply_sender, 'last_name') and reply_sender.last_name:
-                                            sender_name += f" {reply_sender.last_name}"
-                                        if hasattr(reply_sender, 'username') and reply_sender.username:
-                                            sender_name += f" (@{reply_sender.username})"
-                                        
-                                        # Формируем ссылки
-                                        reply_link = await self.get_message_link(chat, reply.id)
-                                        original_link = await self.get_message_link(chat, user_msg.id)
-                                        chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
-                                        
-                                        found_replies.append({
-                                            "chat": chat_name,
-                                            "original_text": user_msg.text[:100] if user_msg.text else "без текста",
-                                            "reply_text": reply.text[:100] if reply.text else "без текста",
-                                            "replier": sender_name or f"User {target_user.id}",
-                                            "reply_time": reply.date.strftime("%d.%m.%Y %H:%M"),
-                                            "reply_link": reply_link,
-                                            "original_link": original_link,
-                                            "chat_id": chat.id,
-                                            "message_id": user_msg.id,
-                                            "reply_id": reply.id
-                                        })
-                                        
-                                        break  # Нашли ответ от целевого пользователя
-                                        
-                                except:
-                                    continue
-                                    
-                    except Exception as e:
-                        print(f"Ошибка проверки ответов на сообщение {user_msg.id}: {e}")
-                        continue
-            else:
-                # Поиск ответов нашего пользователя
-                async for message in self.client.iter_messages(
-                    chat,
-                    limit=100,
-                    from_user=user,
-                    offset_date=start_date
-                ):
-                    if message and message.reply_to:
-                        try:
-                            # Получаем оригинальное сообщение
-                            try:
-                                original_msg = await self.client.get_messages(
-                                    chat,
-                                    ids=message.reply_to.reply_to_msg_id
-                                )
-                                
-                                if original_msg and hasattr(original_msg, 'from_id') and original_msg.from_id:
-                                    original_sender = await self.client.get_entity(original_msg.from_id)
-                                    
-                                    # Если это наш целевой пользователь
-                                    if original_sender.id == target_user.id:
-                                        # Получаем информацию об авторе
-                                        sender_name = getattr(original_sender, 'first_name', '')
-                                        if hasattr(original_sender, 'last_name') and original_sender.last_name:
-                                            sender_name += f" {original_sender.last_name}"
-                                        if hasattr(original_sender, 'username') and original_sender.username:
-                                            sender_name += f" (@{original_sender.username})"
-                                        
-                                        # Формируем ссылки
-                                        reply_link = await self.get_message_link(chat, message.id)
-                                        original_link = await self.get_message_link(chat, original_msg.id)
-                                        chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
-                                        
-                                        found_replies.append({
-                                            "chat": chat_name,
-                                            "original_text": original_msg.text[:100] if original_msg.text else "без текста",
-                                            "reply_text": message.text[:100] if message.text else "без текста",
-                                            "replied_to": sender_name or f"User {target_user.id}",
-                                            "reply_time": message.date.strftime("%d.%m.%Y %H:%M"),
-                                            "reply_link": reply_link,
-                                            "original_link": original_link,
-                                            "chat_id": chat.id,
-                                            "message_id": original_msg.id,
-                                            "reply_id": message.id
-                                        })
-                                        
-                            except:
-                                continue
-                                
-                        except:
-                            continue
-            
-            return found_replies
-            
-        except Exception as e:
-            print(f"Ошибка поиска реплаев в чате {chat_identifier}: {e}")
-            return []
-    
     async def search_replies_from_user(self, chat_id: int, user_id: int, target_user_input: str):
         """Ищет ответы нашего пользователя конкретному пользователю"""
         try:
             await self.send_bot_message(chat_id, 
-                f"🔍 <b>ЗАПУСКАЮ ПОИСК ОТВЕТОВ</b>\n\n"
-                f"👤 Ищу кому отвечает: '{target_user_input}'\n"
-                f"👤 Наш пользователь ID: <code>{user_id}</code>\n"
-                f"⏱ Начинаю сканирование чатов..."
+                f"🔎 <b>Ищу ответы нашего пользователя</b>\n\n"
+                f"👤 Наш пользователь: <code>{user_id}</code>\n"
+                f"👥 Целевой пользователь: '{target_user_input}'\n\n"
+                f"<i>Поиск может занять некоторое время...</i>"
             )
             
             # Получаем нашего пользователя
@@ -2518,12 +2289,10 @@ class TelegramSpyBot:
                 target_user_id = int(target_user_input_clean)
                 try:
                     target_user = await self.client.get_entity(target_user_id)
-                except Exception as e1:
-                    print(f"Попытка 1 поиска по ID {target_user_id} не удалась: {e1}")
+                except:
                     try:
                         target_user = await self.client.get_entity(PeerUser(target_user_id))
-                    except Exception as e2:
-                        print(f"Попытка 2 поиска по ID {target_user_id} не удалась: {e2}")
+                    except:
                         await self.send_bot_message(chat_id, f"❌ Пользователь с ID {target_user_id} не найден")
                         return
             else:
@@ -2553,82 +2322,93 @@ class TelegramSpyBot:
                     "❌ Нет чатов для поиска!\n"
                     "Добавьте чаты в файл chats.txt\n\n"
                     "Пример содержимого файла:\n"
-                    "<code>@durov\n@telegram</code>\n"
-                    "<code>https://t.me/+tmE98W5NO6xlYmQy</code>"
+                    "<code>@durov\n@telegram</code>"
                 )
                 return
             
             found_replies = []
             checked_chats = 0
-            start_date = datetime.now() - timedelta(days=30)  # Последние 30 дней
             
-            # Отправляем стартовое сообщение
-            await self.send_bot_message(chat_id,
-                f"🚀 <b>СКАНИРУЮ ИСТОРИЮ ОТВЕТОВ</b>\n\n"
-                f"👤 Ищу ответы нашему пользователя: {target_user.first_name if hasattr(target_user, 'first_name') else 'ID: ' + str(target_user.id)}\n"
-                f"👤 Наш пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
-                f"📊 Всего чатов для сканирования: {len(chats)}\n"
-                f"⏱ Ожидаемое время: {len(chats) // 10 + 1} минут\n\n"
-                f"<i>Начинаю глубокий поиск ответов...</i>"
-            )
-            
-            # Ищем в каждом чате пакетами по 10
-            for i in range(0, len(chats), 10):
-                batch = chats[i:min(i + 10, len(chats))]
-                batch_start = time.time()
-                
-                # Создаем задачи для параллельного поиска
-                tasks = []
-                for chat_identifier in batch:
-                    task = asyncio.create_task(self.search_replies_in_chat(user, target_user, chat_identifier, start_date, "from"))
-                    tasks.append(task)
-                
-                # Ждем завершения всех задач
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Обрабатываем результаты
-                for result in results:
-                    if isinstance(result, Exception):
+            # Ищем в каждом чате
+            for i, chat_identifier in enumerate(chats, 1):
+                try:
+                    # Получаем чат
+                    chat = await self.get_chat_by_identifier(chat_identifier)
+                    if not chat:
                         continue
                     
-                    if result:
-                        chat_found_replies = result
-                        if chat_found_replies:
-                            found_replies.extend(chat_found_replies)
-                        checked_chats += 1
+                    checked_chats += 1
+                    
+                    # Получаем ВСЕ сообщения нашего пользователя (без лимита)
+                    async for message in self.client.iter_messages(
+                        chat,
+                        from_user=user  # Без лимита
+                    ):
+                        if message and message.reply_to:
+                            try:
+                                # Получаем оригинальное сообщение
+                                try:
+                                    original_msg = await self.client.get_messages(
+                                        chat,
+                                        ids=message.reply_to.reply_to_msg_id
+                                    )
+                                    
+                                    if original_msg and hasattr(original_msg, 'from_id') and original_msg.from_id:
+                                        original_sender = await self.client.get_entity(original_msg.from_id)
+                                        
+                                        # Если это наш целевой пользователь
+                                        if original_sender.id == target_user.id:
+                                            # Получаем информацию об авторе
+                                            sender_name = getattr(original_sender, 'first_name', '')
+                                            if hasattr(original_sender, 'last_name') and original_sender.last_name:
+                                                sender_name += f" {original_sender.last_name}"
+                                            if hasattr(original_sender, 'username') and original_sender.username:
+                                                sender_name += f" (@{original_sender.username})"
+                                            
+                                            # Формируем ссылки
+                                            reply_link = await self.get_message_link(chat, message.id)
+                                            original_link = await self.get_message_link(chat, original_msg.id)
+                                            chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
+                                            
+                                            found_replies.append({
+                                                "chat": chat_name,
+                                                "original_text": original_msg.text[:100] if original_msg.text else "без текста",
+                                                "reply_text": message.text[:100] if message.text else "без текста",
+                                                "replied_to": sender_name or f"User {target_user.id}",
+                                                "reply_time": message.date.strftime("%d.%m.%Y %H:%M"),
+                                                "reply_link": reply_link,
+                                                "original_link": original_link,
+                                                "chat_id": chat.id,
+                                                "message_id": original_msg.id,
+                                                "reply_id": message.id
+                                            })
+                                            
+                                            # Отправляем сразу если нашли (первые 3 сразу)
+                                            if len(found_replies) <= 3:
+                                                reply_info = (
+                                                    f"💬 <b>Найден ответ нашему пользователя {sender_name}:</b>\n\n"
+                                                    f"👤 Кому отвечал: {sender_name}\n"
+                                                    f"💬 Чат: {chat_name[:50]}\n"
+                                                    f"📅 Время: {message.date.strftime('%H:%M')}\n"
+                                                    f"📝 Оригинал: {original_msg.text[:150] if original_msg.text else 'нет текста'}\n"
+                                                    f"📝 Ответ: {message.text[:150] if message.text else 'нет текста'}\n"
+                                                    f"🔗 Ответ: {reply_link}\n"
+                                                    f"🔗 Оригинал: {original_link}"
+                                                )
+                                                await self.send_bot_message(chat_id, reply_info)
+                                            
+                                except:
+                                    continue
+                                    
+                            except:
+                                continue
+                    
+                except Exception as e:
+                    print(f"Ошибка поиска в чате {chat_identifier}: {e}")
+                    continue
                 
-                # Отправляем прогресс каждые 10 чатов
-                progress_percent = min(100, int((i + len(batch)) / len(chats) * 100))
-                batch_time = time.time() - batch_start
-                
-                progress_msg = (
-                    f"📡 <b>ПОИСК ОТВЕТОВ В ПРОЦЕССЕ</b>\n\n"
-                    f"📊 Прогресс: {progress_percent}%\n"
-                    f"✅ Проверено чатов: {checked_chats}/{len(chats)}\n"
-                    f"💬 Найдено ответов: {len(found_replies)}\n"
-                    f"⚡ Скорость: {len(batch)/batch_time:.1f} чатов/сек\n"
-                    f"⏱ Осталось: {(len(chats) - checked_chats) / 8:.0f} секунд\n\n"
-                    f"<i>Анализирую взаимодействия...</i>"
-                )
-                
-                await self.send_bot_message(chat_id, progress_msg)
-                
-                # Отправляем найденные ответы если их мало
-                if len(found_replies) <= 5 and found_replies:
-                    for reply in found_replies[-min(2, len(found_replies)):]:
-                        reply_info = (
-                            f"💬 <b>НАЙДЕН ОТВЕТ:</b>\n\n"
-                            f"👤 Кому: {reply['replied_to']}\n"
-                            f"💬 Чат: {reply['chat'][:30]}\n"
-                            f"📅 Время: {reply['reply_time']}\n"
-                            f"📝 Ответ: {reply['reply_text']}\n"
-                            f"🔗 Ответ: {reply['reply_link']}"
-                        )
-                        await self.send_bot_message(chat_id, reply_info)
-                
-                # Пауза между батчами
-                if i + 10 < len(chats):
-                    await asyncio.sleep(1)
+                # Пауза между чатами
+                await asyncio.sleep(0.3)
             
             # Итоговый отчет
             if found_replies:
@@ -2640,33 +2420,34 @@ class TelegramSpyBot:
                     target_name += f" (@{target_user.username})"
                 
                 total_text = (
-                    f"🏆 <b>ПОИСК ОТВЕТОВ ЗАВЕРШЕН!</b>\n\n"
+                    f"✅ <b>Поиск завершен!</b>\n\n"
                     f"👤 Наш пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
                     f"👥 Целевой пользователь: {target_name}\n"
                     f"🆔 ID целевого: <code>{target_user.id}</code>\n"
-                    f"📊 Найдено ответов: <b>{len(found_replies)}</b>\n"
+                    f"📊 Найдено ответов: {len(found_replies)}\n"
                     f"📁 Проверено чатов: {checked_chats} из {len(chats)}\n"
-                    f"⏳ Период: последние 30 дней\n"
-                    f"⏱ Время поиска: {time.time() - batch_start:.0f} секунд\n\n"
+                    f"⏳ Период: все сообщения\n\n"
+                    f"<i>Первые результаты отправлены выше ↑</i>"
                 )
                 
-                # Добавляем статистику по чатам
-                chat_stats = {}
-                for reply in found_replies:
-                    chat_name = reply['chat']
-                    chat_stats[chat_name] = chat_stats.get(chat_name, 0) + 1
-                
-                if chat_stats:
-                    total_text += f"📊 <b>РАСПРЕДЕЛЕНИЕ ПО ЧАТАМ:</b>\n"
-                    sorted_chats = sorted(chat_stats.items(), key=lambda x: x[1], reverse=True)[:3]
-                    for chat_name, count in sorted_chats:
-                        total_text += f"• {chat_name[:20]}: {count} ответов\n"
-                
-                # Отправляем оставшиеся результаты
-                if len(found_replies) > 5:
-                    total_text += f"\n📄 <b>ПОКАЗАНО: 5 из {len(found_replies)}</b>\n"
-                    if len(found_replies) > 10:
-                        total_text += f"<i>Остальные результаты можно просмотреть в истории чата</i>"
+                # Если нашли больше 3, отправляем еще результаты
+                if len(found_replies) > 3:
+                    remaining = found_replies[3:min(8, len(found_replies))]
+                    for reply in remaining:
+                        reply_info = (
+                            f"💬 <b>Еще ответ нашему пользователя {target_name}:</b>\n\n"
+                            f"💬 Чат: {reply['chat'][:50]}\n"
+                            f"📅 Время: {reply['reply_time']}\n"
+                            f"📝 Ответ: {reply['reply_text']}\n"
+                            f"🔗 Ответ: {reply['reply_link']}"
+                        )
+                        await self.send_bot_message(chat_id, reply_info)
+                    
+                    if len(found_replies) > 8:
+                        await self.send_bot_message(chat_id,
+                            f"📄 <b>И еще {len(found_replies) - 8} ответов...</b>\n"
+                            f"Всего найдено: {len(found_replies)}"
+                        )
             else:
                 # Получаем информацию о целевом пользователе
                 target_name = getattr(target_user, 'first_name', '')
@@ -2676,23 +2457,21 @@ class TelegramSpyBot:
                     target_name += f" (@{target_user.username})"
                 
                 total_text = (
-                    f"❌ <b>ОТВЕТЫ НЕ НАЙДЕНЫ</b>\n\n"
+                    f"❌ <b>Ответы не найдены</b>\n\n"
                     f"👤 Наш пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
                     f"👥 Целевой пользователь: {target_name}\n"
                     f"🆔 ID целевого: <code>{target_user.id}</code>\n"
                     f"📁 Проверено чатов: {checked_chats} из {len(chats)}\n"
-                    f"⏳ Период: последние 30 дней\n"
-                    f"⏱ Время поиска: {time.time() - batch_start:.0f} секунд\n\n"
-                    f"<i>Наш пользователь не отвечал на сообщения пользователя {target_name} за последние 30 дней</i>"
+                    f"⏳ Период: все сообщения\n\n"
+                    f"<i>Наш пользователь не отвечал на сообщения пользователя {target_name}</i>"
                 )
             
             keyboard = self.create_keyboard([
                 [
                     {"text": "🔍 Новый поиск", "callback_data": f"search_replies_from:{user_id}"},
-                    {"text": "📊 Полная статистика", "callback_data": f"user_info:{user_id}"}
+                    {"text": "📊 Профиль", "callback_data": f"user_info:{user_id}"}
                 ],
                 [
-                    {"text": "💬 Анализ ответов", "callback_data": f"show_replies:{user_id}"},
                     {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
                 ]
             ])
@@ -2717,8 +2496,6 @@ class TelegramSpyBot:
             replies_to_user = []  # Кто отвечает пользователю
             replies_from_user = []  # Кому отвечает пользователь
             
-            start_date = datetime.now() - timedelta(days=7)  # Последние 7 дней
-            
             for i, chat_identifier in enumerate(chat_identifiers, 1):
                 try:
                     # Получаем чат
@@ -2726,13 +2503,11 @@ class TelegramSpyBot:
                     if not chat:
                         continue
                     
-                    # Получаем сообщения пользователя за последние 7 дней
+                    # Получаем ВСЕ сообщения пользователя (без лимита)
                     user_messages = []
                     async for message in self.client.iter_messages(
                         chat,
-                        limit=100,
-                        from_user=user,
-                        offset_date=start_date
+                        from_user=user  # Без лимита
                     ):
                         if message:
                             user_messages.append(message)
@@ -2743,8 +2518,8 @@ class TelegramSpyBot:
                             # Получаем ответы на это сообщение
                             async for reply in self.client.iter_messages(
                                 chat,
-                                limit=10,
-                                min_id=user_msg.id - 1
+                                min_id=user_msg.id - 1,
+                                limit=None  # Без лимита
                             ):
                                 if (reply and reply.reply_to and 
                                     reply.reply_to.reply_to_msg_id == user_msg.id and
@@ -2786,9 +2561,7 @@ class TelegramSpyBot:
                     # Проверяем кому отвечает пользователь
                     async for message in self.client.iter_messages(
                         chat,
-                        limit=100,
-                        from_user=user,
-                        offset_date=start_date
+                        from_user=user  # Без лимита
                     ):
                         if message and message.reply_to:
                             try:
@@ -2836,7 +2609,7 @@ class TelegramSpyBot:
                     continue
                 
                 # Пауза между чатами
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.3)
             
             # Сохраняем в кэш
             self.reply_data_cache[user_id] = {
@@ -2862,9 +2635,8 @@ class TelegramSpyBot:
             if not replies_to_user:
                 await self.send_bot_message(chat_id,
                     f"❌ <b>Ответов не найдено</b>\n\n"
-                    f"👤 Пользователь: <code>{user_id}</code>\n"
-                    f"⏳ Период: последние 7 дней\n\n"
-                    f"За последнюю неделю никто не отвечал на сообщения пользователя."
+                    f"👤 Пользователь: <code>{user_id}</code>\n\n"
+                    f"Никто не отвечал на сообщения пользователя."
                 )
                 return
             
@@ -2900,7 +2672,7 @@ class TelegramSpyBot:
                 f"👤 Пользователь: <code>{user_id}</code>\n"
                 f"📊 Всего отвечавших: {len(sorted_users)}\n"
                 f"💬 Всего ответов: {len(replies_to_user)}\n"
-                f"⏳ Период: последние 7 дней\n\n"
+                f"⏳ Период: все сообщения\n\n"
                 f"<i>Страница {page + 1} из {total_pages}</i>\n\n"
             )
             
@@ -2953,9 +2725,8 @@ class TelegramSpyBot:
             if not replies_from_user:
                 await self.send_bot_message(chat_id,
                     f"❌ <b>Ответов не найдено</b>\n\n"
-                    f"👤 Пользователь: <code>{user_id}</code>\n"
-                    f"⏳ Период: последние 7 дней\n\n"
-                    f"За последнюю неделю пользователь никому не отвечал."
+                    f"👤 Пользователь: <code>{user_id}</code>\n\n"
+                    f"Пользователь никому не отвечал."
                 )
                 return
             
@@ -2991,7 +2762,7 @@ class TelegramSpyBot:
                 f"👤 Пользователь: <code>{user_id}</code>\n"
                 f"📊 Всего собеседников: {len(sorted_users)}\n"
                 f"💬 Всего ответов: {len(replies_from_user)}\n"
-                f"⏳ Период: последние 7 дней\n\n"
+                f"⏳ Период: все сообщения\n\n"
                 f"<i>Страница {page + 1} из {total_pages}</i>\n\n"
             )
             
@@ -3408,93 +3179,59 @@ class TelegramSpyBot:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith('#'):
-                        # Извлекаем идентификатор из разных форматов
-                        identifier = self.extract_chat_identifier(line)
-                        if identifier:
-                            chats.append(identifier)
-        except Exception as e:
-            print(f"Ошибка загрузки чатов: {e}")
+                        chats.append(line)
+        except:
+            pass
         
         return chats
     
-    def extract_chat_identifier(self, line: str) -> str:
-        """Извлекает идентификатор чата из строки"""
-        line = line.strip()
-        
-        if not line:
-            return None
-        
-        # Проверяем формат https://t.me/+XXXXXXXXXXX (приватные ссылки)
-        if line.startswith('https://t.me/+'):
-            # Извлекаем часть после + (приватный инвайт-код)
-            parts = line.split('+')
-            if len(parts) > 1:
-                invite_code = parts[1]
-                return f"https://t.me/+{invite_code}"
-        
-        # Проверяем формат https://t.me/username
-        elif line.startswith('https://t.me/'):
-            # Извлекаем username из URL
-            username = line.replace('https://t.me/', '').split('/')[0]
-            if username:
-                return username
-        
-        # Проверяем формат @username
-        elif line.startswith('@'):
-            return line.replace('@', '')
-        
-        # Проверяем ID (числа или отрицательные числа)
-        elif line.isdigit() or (line.startswith('-') and line[1:].isdigit()):
-            return line
-        
-        # Если это просто текст без @, считаем это username
-        elif '/' not in line and ':' not in line:
-            return line
-        
-        return line
-    
     async def get_chat_by_identifier(self, identifier: str):
-        """Получает чат по идентификатору"""
+        """Получает чат по идентификатору (поддерживает ссылки с + и обычные)"""
         try:
             identifier = identifier.strip()
             
-            # Проверяем формат приватной ссылки https://t.me/+XXXXXXXXXXX
-            if identifier.startswith('https://t.me/+'):
+            # Проверяем, является ли это ссылкой t.me/+
+            if identifier.startswith("https://t.me/+") or identifier.startswith("t.me/+"):
+                # Это ссылка с плюсом, извлекаем код
+                if identifier.startswith("https://"):
+                    identifier = identifier[13:]  # Убираем "https://t.me/+"
+                else:
+                    identifier = identifier[7:]   # Убираем "t.me/+"
+                
+                # Теперь identifier это что-то вроде "tmE98W5NO6xlYmQy"
                 try:
-                    # Пытаемся импортировать сообщение по ссылке
-                    message = await self.client.get_messages(identifier, limit=1)
-                    if message and hasattr(message, 'chat'):
-                        return message.chat
+                    # Пробуем получить чат по invite ссылке
+                    chat = await self.client.get_entity(identifier)
+                    return chat
                 except Exception as e:
-                    print(f"Не удалось получить чат по приватной ссылке {identifier}: {e}")
-                    
-                # Пробуем альтернативный метод
-                try:
-                    # Извлекаем invite_hash из ссылки
-                    invite_hash = identifier.replace('https://t.me/+', '')
-                    # Пробуем получить через import_chat_invite
-                    result = await self.client(functions.messages.ImportChatInviteRequest(
-                        hash=invite_hash
-                    ))
-                    if hasattr(result, 'chats') and result.chats:
-                        return result.chats[0]
-                except Exception as e:
-                    print(f"Не удалось импортировать чат по приватной ссылке {identifier}: {e}")
+                    print(f"Ошибка получения чата по invite ссылке {identifier}: {e}")
+                    return None
             
-            # Обработка username или ID
-            identifier_clean = identifier.replace('@', '')
+            # Если это обычная ссылка с @
+            elif identifier.startswith("https://t.me/") or identifier.startswith("t.me/"):
+                if identifier.startswith("https://"):
+                    identifier = identifier[13:]  # Убираем "https://t.me/"
+                else:
+                    identifier = identifier[7:]   # Убираем "t.me/"
             
-            if identifier_clean.startswith('-100') and identifier_clean[4:].isdigit():
+            # Убираем @ если есть
+            identifier = identifier.replace('@', '')
+            
+            if not identifier:
+                return None
+            
+            # Проверяем, является ли это ID канала/супергруппы
+            if identifier.startswith('-100') and identifier[4:].isdigit():
                 # ID канала/супергруппы
-                chat_id = int(identifier_clean)
+                chat_id = int(identifier)
                 return await self.client.get_entity(PeerChannel(chat_id))
-            elif identifier_clean.isdigit() or (identifier_clean.startswith('-') and identifier_clean[1:].isdigit()):
+            elif identifier.isdigit() or (identifier.startswith('-') and identifier[1:].isdigit()):
                 # Просто ID
-                chat_id = int(identifier_clean)
+                chat_id = int(identifier)
                 try:
                     return await self.client.get_entity(chat_id)
                 except:
-                    # Пробуем получить через InputPeerChannel для отрицательных ID
+                    # Пробуем как PeerChannel если это отрицательный ID
                     if chat_id < 0:
                         try:
                             return await self.client.get_entity(PeerChannel(chat_id))
@@ -3504,10 +3241,10 @@ class TelegramSpyBot:
             else:
                 # Username
                 try:
-                    return await self.client.get_entity(identifier_clean)
+                    return await self.client.get_entity(identifier)
                 except:
                     try:
-                        return await self.client.get_entity(f"@{identifier_clean}")
+                        return await self.client.get_entity(f"@{identifier}")
                     except:
                         return None
         except Exception as e:
@@ -3587,12 +3324,13 @@ class TelegramSpyBot:
     async def run(self):
         """Основной метод запуска"""
         print("="*60)
-        print("🤖 TELEGRAM SPY BOT v3.4")
+        print("🤖 TELEGRAM SPY BOT v4.0")
         print("="*60)
-        print("✨ Новые функции:")
-        print("• Поддержка приватных ссылок https://t.me/+XXXXXXXXXXX")
-        print("• Улучшенный поиск по ID пользователя")
-        print("• Автопарсинг разных форматов чатов")
+        print("✨ НОВАЯ ВЕРСИЯ:")
+        print("• Убраны все лимиты на поиск сообщений и реплаев")
+        print("• Поддержка ссылок вида https://t.me/+tmE98W5NO6xlYmQy")
+        print("• Улучшен поиск пользователей по ID")
+        print("• Поиск ВСЕХ сообщений без ограничений")
         print("="*60)
         
         # Подключаемся к Telegram
@@ -3603,16 +3341,17 @@ class TelegramSpyBot:
         # Тестируем бота
         print("🔍 Тестирую подключение к боту...")
         test_msg = (
-            f"🤖 <b>Шпионский бот запущен!</b>\n\n"
+            f"🤖 <b>Шпионский бот запущен! (v4.0)</b>\n\n"
             f"✅ Подключение установлено\n"
             f"👤 Аккаунт: {self.current_user.first_name if self.current_user else 'Неизвестно'}\n"
             f"🆔 ID: {self.current_user.id if self.current_user else 'Неизвестно'}\n"
             f"🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            f"✨ <b>Новые функции v3.4:</b>\n"
-            f"• Поддержка приватных ссылок https://t.me/+XXXXXXXXXXX\n"
-            f"• Улучшенный поиск пользователей по ID\n"
-            f"• Поддержка разных форматов чатов в chats.txt\n"
-            f"• Автопарсинг ссылок и username\n\n"
+            f"✨ <b>ГЛАВНЫЕ УЛУЧШЕНИЯ:</b>\n"
+            f"• Убраны ВСЕ лимиты на поиск сообщений\n"
+            f"• Поддержка ссылок с + (приватные чаты)\n"
+            f"• Улучшен поиск пользователей по ID\n"
+            f"• Ищет ВСЕ сообщения без ограничений\n"
+            f"• Ищет ВСЕ реплаи без ограничений\n\n"
             f"📝 Отправьте /start для начала работы"
         )
         
