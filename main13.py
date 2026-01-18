@@ -3108,4 +3108,519 @@ class TelegramSpyBot:
             
             # Формируем сообщение
             message_text = f"💬 <b>{title}</b>\n\n"
-            message_text += f"📊 Всего ответов: {
+            message_text += f"📊 Всего ответов: {len(target_replies)}\n"
+            message_text += f"📄 Страница {page + 1} из {total_pages}\n\n"
+            
+            # Добавляем реплаи
+            for i in range(start_idx, end_idx):
+                reply = target_replies[i]
+                message_text += f"<b>Ответ {i+1}:</b>\n"
+                message_text += f"💬 Чат: {reply['chat_name'][:30]}\n"
+                message_text += f"📅 Дата: {reply['reply_time']}\n"
+                message_text += f"📝 Оригинал: {reply['original_text']}\n"
+                message_text += f"📝 Ответ: {reply['reply_text']}\n"
+                message_text += f"🔗 Ответ: {reply['reply_link']}\n"
+                message_text += f"🔗 Оригинал: {reply['original_link']}\n\n"
+            
+            # Создаем клавиатуру
+            keyboard_buttons = []
+            
+            # Кнопки навигации по страницам
+            nav_buttons = []
+            if page > 0:
+                nav_buttons.append({"text": "⬅️ Назад", "callback_data": f"reply_page:{user_id}:{user_index}:{direction}:{page-1}"})
+            
+            nav_buttons.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": "noop"})
+            
+            if page < total_pages - 1:
+                nav_buttons.append({"text": "Вперёд ➡️", "callback_data": f"reply_page:{user_id}:{user_index}:{direction}:{page+1}"})
+            
+            if nav_buttons:
+                keyboard_buttons.append(nav_buttons)
+            
+            # Кнопки управления
+            back_action = "replies_to_user" if direction == "to" else "replies_from_user"
+            keyboard_buttons.append([
+                {"text": "🔙 К списку", "callback_data": f"{back_action}:{user_id}:0"},
+                {"text": "🔄 Обновить", "callback_data": f"view_reply_pair:{user_id}:{user_index}:{direction}"}
+            ])
+            
+            keyboard = self.create_keyboard(keyboard_buttons)
+            await self.send_bot_message(chat_id, message_text, keyboard)
+            
+        except Exception as e:
+            print(f"Ошибка отправки страницы реплаев: {e}")
+            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+    
+    async def show_friends_menu(self, chat_id: int, user_id: int):
+        """Показывает меню друзей"""
+        try:
+            user = await self.client.get_entity(PeerUser(user_id))
+            
+            menu_text = (
+                f"👥 <b>АНАЛИЗ ДРУЗЕЙ И КОНТАКТОВ</b>\n\n"
+                f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
+                f"🆔 ID: <code>{user_id}</code>\n"
+                f"⚡ Ускоренный поиск реплаев\n\n"
+                f"<i>Выберите тип анализа:</i>"
+            )
+            
+            keyboard_buttons = [
+                [
+                    {"text": "👥 Кто отвечает пользователю", "callback_data": f"replies_to_user:{user_id}:0"},
+                    {"text": "👤 Кому отвечает пользователь", "callback_data": f"replies_from_user:{user_id}:0"}
+                ],
+                [
+                    {"text": "🔍 Поиск кто отвечает юзеру", "callback_data": f"search_replies_to:{user_id}"},
+                    {"text": "🔍 Поиск кому отвечает юзер", "callback_data": f"search_replies_from:{user_id}"}
+                ],
+                [
+                    {"text": "📊 Частые собеседники", "callback_data": f"track_friends_old:{user_id}"},
+                    {"text": "🔍 Найти сообщения", "callback_data": f"search_messages:{user_id}"}
+                ],
+                [
+                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"},
+                    {"text": "🔄 Обновить", "callback_data": f"track_friends:{user_id}"}
+                ]
+            ]
+            
+            keyboard = self.create_keyboard(keyboard_buttons)
+            await self.send_bot_message(chat_id, menu_text, keyboard)
+            
+        except Exception as e:
+            print(f"Ошибка показа меню друзей: {e}")
+            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+    
+    async def show_message_details(self, chat_id: int, message_chat_id: int, message_id: int):
+        """Показывает детали сообщения"""
+        try:
+            # Получаем чат
+            try:
+                chat = await self.client.get_entity(message_chat_id)
+            except:
+                await self.send_bot_message(chat_id, "❌ Не удалось получить чат")
+                return
+            
+            # Получаем сообщение
+            try:
+                message = await self.client.get_messages(chat, ids=message_id)
+            except:
+                await self.send_bot_message(chat_id, "❌ Не удалось получить сообщение")
+                return
+            
+            if not message:
+                await self.send_bot_message(chat_id, "❌ Сообщение не найдено")
+                return
+            
+            # Формируем ссылку
+            link = await self.get_message_link(chat, message_id)
+            
+            # Получаем информацию об отправителе
+            sender_name = "Неизвестный"
+            if hasattr(message, 'sender_id'):
+                try:
+                    sender = await self.client.get_entity(message.sender_id)
+                    sender_name = getattr(sender, 'first_name', '')
+                    if hasattr(sender, 'last_name') and sender.last_name:
+                        sender_name += f" {sender.last_name}"
+                    if hasattr(sender, 'username') and sender.username:
+                        sender_name += f" (@{sender.username})"
+                except:
+                    pass
+            
+            # Формируем сообщение
+            message_text = (
+                f"💬 <b>ДЕТАЛИ СООБЩЕНИЯ</b>\n\n"
+                f"👤 Отправитель: {sender_name}\n"
+                f"💬 Чат: {getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))}\n"
+                f"📅 Дата: {message.date.strftime('%d.%m.%Y %H:%M:%S')}\n"
+                f"🔗 Ссылка: {link}\n\n"
+                f"<b>Текст сообщения:</b>\n"
+                f"{message.text[:1000] if message.text else 'Сообщение без текста'}\n\n"
+            )
+            
+            # Если есть реплай
+            if message.reply_to:
+                message_text += f"<b>↪️ Ответ на сообщение:</b> ID {message.reply_to.reply_to_msg_id}\n"
+            
+            keyboard = self.create_keyboard([
+                [
+                    {"text": "🔗 Открыть в Telegram", "url": link},
+                    {"text": "🔙 Закрыть", "callback_data": "close"}
+                ]
+            ])
+            
+            await self.send_bot_message(chat_id, message_text, keyboard)
+            
+        except Exception as e:
+            print(f"Ошибка показа деталей сообщения: {e}")
+            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+    
+    async def show_monitoring_menu(self, chat_id: int):
+        """Показывает меню управления отслеживанием"""
+        if not self.monitored_users:
+            await self.send_bot_message(chat_id,
+                "📭 <b>Нет отслеживаемых пользователей</b>\n\n"
+                "Отправьте @username чтобы добавить пользователя.\n\n"
+                "Пример: <code>@durov</code>"
+            )
+            return
+        
+        # Считаем активные задачи
+        active_tasks = sum(1 for t in self.tracking_tasks if not t.done())
+        
+        menu_text = (
+            f"👁 <b>ОТСЛЕЖИВАЕМЫЕ ПОЛЬЗОВАТЕЛИ:</b>\n\n"
+            f"📊 Всего в кэше: {len(self.monitored_users)}\n"
+            f"🔄 Активных задач: {active_tasks}\n"
+            f"⚡ Ускоренная версия\n\n"
+            f"<i>Выберите пользователя:</i>"
+        )
+        
+        # Создаем кнопки для каждого пользователя (первые 8)
+        buttons = []
+        users_list = list(self.monitored_users.items())[:8]
+        
+        for user_id, profile in users_list:
+            name = profile.first_name[:15] or f"User {user_id}"
+            status_msg = "📨" if profile.is_tracking_messages else ""
+            status_ava = "🖼" if profile.is_tracking_avatar else ""
+            status_rep = "💬" if profile.is_tracking_replies else ""
+            status = f"{status_msg}{status_ava}{status_rep}"
+            
+            buttons.append([
+                {"text": f"👤 {name} {status}", "callback_data": f"user_info:{user_id}"}
+            ])
+        
+        if len(self.monitored_users) > 8:
+            buttons.append([
+                {"text": f"📄 И еще {len(self.monitored_users) - 8}...", "callback_data": "show_more_users"}
+            ])
+        
+        buttons.append([
+            {"text": "📊 Статистика", "callback_data": "stats"},
+            {"text": "➕ Добавить", "callback_data": "add_user"}
+        ])
+        
+        keyboard = self.create_keyboard(buttons)
+        
+        await self.send_bot_message(chat_id, menu_text, keyboard)
+    
+    async def show_stats(self, chat_id: int):
+        """Показывает статистику бота"""
+        active_tasks = sum(1 for t in self.tracking_tasks if not t.done())
+        
+        # Считаем пользователей с отслеживанием
+        tracking_msg = sum(1 for u in self.monitored_users.values() if u.is_tracking_messages)
+        tracking_ava = sum(1 for u in self.monitored_users.values() if u.is_tracking_avatar)
+        tracking_rep = sum(1 for u in self.monitored_users.values() if u.is_tracking_replies)
+        
+        stats_text = (
+            f"📊 <b>СТАТИСТИКА БОТА:</b>\n\n"
+            f"👥 Пользователей в кэше: {len(self.monitored_users)}\n"
+            f"📨 Отслеживается сообщений: {tracking_msg}\n"
+            f"🖼 Отслеживается аватарок: {tracking_ava}\n"
+            f"💬 Отслеживается ответов: {tracking_rep}\n"
+            f"🔄 Активных задач мониторинга: {active_tasks}\n"
+            f"📸 Аватарок в кэше: {len(self.avatar_cache)}\n"
+            f"💾 Сохранено профилей: {len(self.monitored_users)}\n"
+            f"⚡ Версия: Ускоренная (без лимитов)\n"
+            f"⏰ Время работы сервера: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+        )
+        
+        # Добавляем информацию о задачах
+        if active_tasks > 0:
+            stats_text += f"⚙️ <b>Текущие задачи:</b>\n"
+            for task in self.tracking_tasks[:5]:  # Первые 5 задач
+                if not task.done():
+                    task_name = task.get_name() or "Unknown"
+                    stats_text += f"• {task_name}\n"
+            
+            if active_tasks > 5:
+                stats_text += f"... и еще {active_tasks - 5} задач\n"
+        
+        stats_text += f"\n🤖 <b>Бот работает стабильно!</b>"
+        
+        await self.send_bot_message(chat_id, stats_text)
+    
+    # Вспомогательные методы
+    
+    async def load_chats_list(self) -> List[str]:
+        """Загружает список чатов из файла"""
+        if not os.path.exists(CHATS_FILE):
+            return []
+        
+        chats = []
+        try:
+            with open(CHATS_FILE, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        # Обрабатываем разные форматы ссылок
+                        if 't.me/+' in line:
+                            # Извлекаем invite код из ссылки
+                            match = re.search(r't\.me/\+(.+)', line)
+                            if match:
+                                invite_code = match.group(1)
+                                chats.append(f"+{invite_code}")
+                        elif 't.me/' in line:
+                            # Обычная ссылка
+                            match = re.search(r't\.me/(.+)', line)
+                            if match:
+                                username = match.group(1)
+                                if not username.startswith('@'):
+                                    chats.append(f"@{username}")
+                                else:
+                                    chats.append(username)
+                        elif line.startswith('@'):
+                            chats.append(line)
+                        elif line.startswith('+'):
+                            chats.append(line)
+                        else:
+                            chats.append(line)
+        except Exception as e:
+            print(f"Ошибка загрузки чатов: {e}")
+            pass
+        
+        return list(set(chats))  # Убираем дубликаты
+    
+    async def get_chat_by_identifier(self, identifier: str):
+        """Получает чат по идентификатору"""
+        try:
+            identifier = identifier.strip()
+            
+            # Обрабатываем разные форматы
+            if identifier.startswith('+'):
+                # Пригласительная ссылка
+                try:
+                    return await self.client.get_entity(identifier)
+                except:
+                    # Пробуем как обычную ссылку
+                    try:
+                        return await self.client.get_entity(f"https://t.me/{identifier[1:]}")
+                    except:
+                        return None
+            elif identifier.startswith('https://t.me/+'):
+                # Полная ссылка с invite
+                try:
+                    return await self.client.get_entity(identifier)
+                except:
+                    return None
+            elif identifier.startswith('https://t.me/'):
+                # Обычная ссылка
+                try:
+                    return await self.client.get_entity(identifier)
+                except:
+                    return None
+            elif identifier.startswith('@'):
+                # Username
+                try:
+                    return await self.client.get_entity(identifier)
+                except:
+                    return None
+            elif identifier.isdigit() or (identifier.startswith('-') and identifier[1:].isdigit()):
+                # ID
+                chat_id = int(identifier)
+                try:
+                    if chat_id < 0:
+                        # Группа/канал
+                        if identifier.startswith('-100'):
+                            return await self.client.get_entity(PeerChannel(chat_id))
+                        else:
+                            return await self.client.get_entity(chat_id)
+                    else:
+                        # Пользователь
+                        return await self.client.get_entity(PeerUser(chat_id))
+                except:
+                    try:
+                        return await self.client.get_entity(chat_id)
+                    except:
+                        return None
+            else:
+                # Пробуем как username
+                try:
+                    return await self.client.get_entity(f"@{identifier}")
+                except:
+                    return None
+        except Exception as e:
+            print(f"Ошибка получения чата {identifier}: {e}")
+            return None
+    
+    async def get_message_link(self, chat, message_id: int) -> str:
+        """Формирует ссылку на сообщение"""
+        try:
+            if hasattr(chat, 'username') and chat.username:
+                return f"https://t.me/{chat.username}/{message_id}"
+            else:
+                chat_id = str(getattr(chat, 'id', ''))
+                if chat_id.startswith('-100'):
+                    chat_id = chat_id.replace('-100', '')
+                elif chat_id.startswith('-'):
+                    chat_id = chat_id[1:]
+                
+                return f"https://t.me/c/{chat_id}/{message_id}"
+        except:
+            return f"Message ID: {message_id}"
+    
+    async def run_bot_polling(self):
+        """Запускает polling бота"""
+        print("🤖 Запускаю polling бота...")
+        
+        offset = 0
+        max_retries = 5
+        retry_count = 0
+        
+        while True:
+            try:
+                # Получаем обновления
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+                params = {
+                    "offset": offset,
+                    "timeout": 25,
+                    "allowed_updates": ["message", "callback_query"]
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, params=params, timeout=30) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            retry_count = 0  # Сброс счетчика при успехе
+                            
+                            if data.get("ok") and data.get("result"):
+                                for update in data["result"]:
+                                    offset = update["update_id"] + 1
+                                    
+                                    if "message" in update:
+                                        await self.handle_bot_command(update)
+                                    elif "callback_query" in update:
+                                        await self.handle_callback_query(update)
+                        else:
+                            print(f"❌ Ошибка API: {response.status}")
+                            retry_count += 1
+                
+                # Если много ошибок подряд, ждем подольше
+                if retry_count >= max_retries:
+                    print(f"⚠️ Много ошибок, увеличиваю задержку...")
+                    await asyncio.sleep(30)
+                    retry_count = 0
+                
+            except asyncio.TimeoutError:
+                # Таймаут - это нормально для long polling
+                continue
+            except aiohttp.ClientError as e:
+                print(f"❌ Ошибка сети: {e}")
+                retry_count += 1
+                await asyncio.sleep(5)
+            except Exception as e:
+                print(f"❌ Ошибка polling: {e}")
+                retry_count += 1
+                await asyncio.sleep(5)
+    
+    async def run(self):
+        """Основной метод запуска"""
+        print("="*60)
+        print("🤖 TELEGRAM SPY BOT v4.0 - УСКОРЕННАЯ ВЕРСИЯ")
+        print("="*60)
+        print("✨ Улучшения:")
+        print("• Обработка 10 чатов одновременно")
+        print("• Убраны все лимиты на сообщения")
+        print("• Исправлен поиск реплаев")
+        print("• Поддержка ссылок t.me/+invite_code")
+        print("• Улучшенный поиск по ID")
+        print("="*60)
+        
+        # Подключаемся к Telegram
+        if not await self.connect():
+            print("❌ Не удалось подключиться к Telegram")
+            return
+        
+        # Тестируем бота
+        print("🔍 Тестирую подключение к боту...")
+        test_msg = (
+            f"🤖 <b>Шпионский бот запущен!</b>\n\n"
+            f"✅ Подключение установлено\n"
+            f"👤 Аккаунт: {self.current_user.first_name if self.current_user else 'Неизвестно'}\n"
+            f"🆔 ID: {self.current_user.id if self.current_user else 'Неизвестно'}\n"
+            f"⚡ Версия: Ускоренная (без лимитов)\n"
+            f"🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+            f"✨ <b>Улучшенные функции:</b>\n"
+            f"• Поиск без лимитов (все сообщения)\n"
+            f"• Обработка 10 чатов одновременно\n"
+            f"• Быстрый поиск реплаев\n"
+            f"• Поддержка всех форматов ссылок\n"
+            f"• Улучшенный поиск по ID\n\n"
+            f"📝 Отправьте /start для начала работы"
+        )
+        
+        if await self.send_bot_message(ADMIN_ID, test_msg):
+            print("✅ Бот подключен и готов к работе!")
+        else:
+            print("⚠️ Бот не отвечает, но поиск будет работать")
+        
+        # Запускаем polling бота в фоне
+        bot_task = asyncio.create_task(self.run_bot_polling())
+        
+        print("\n" + "="*60)
+        print("✅ Бот запущен! Отправьте команду /start в Telegram")
+        print(f"📱 ID вашего бота можно найти по токену")
+        print("="*60 + "\n")
+        
+        try:
+            # Ждем завершения
+            await bot_task
+        except KeyboardInterrupt:
+            print("\n\n🛑 Получен сигнал остановки...")
+        except Exception as e:
+            print(f"\n❌ Критическая ошибка: {e}")
+        finally:
+            print("\n💾 Сохраняю данные...")
+            self.save_monitored_users()
+            
+            # Отменяем все задачи
+            print("🛑 Останавливаю задачи мониторинга...")
+            for task in self.tracking_tasks:
+                if not task.done():
+                    task.cancel()
+            
+            # Отключаемся
+            print("🔒 Отключаюсь от Telegram...")
+            if self.client:
+                await self.client.disconnect()
+            
+            print("👋 Бот завершил работу")
+
+# Запуск бота
+if __name__ == "__main__":
+    # Проверяем зависимости
+    try:
+        import telethon
+        import aiohttp
+    except ImportError as e:
+        print(f"❌ Не установлены зависимости: {e}")
+        print("📦 Установите: pip install telethon aiohttp")
+        sys.exit(1)
+    
+    # Проверяем Python версию
+    if sys.version_info < (3, 7):
+        print("❌ Требуется Python 3.7 или выше!")
+        sys.exit(1)
+    
+    # Проверяем API данные
+    if not os.path.exists("api_config.txt"):
+        print("❌ Файл api_config.txt не найден!")
+        print("📝 Создайте его с содержимым:")
+        print("API_ID=ваш_api_id")
+        print("API_HASH=ваш_api_hash")
+        sys.exit(1)
+    
+    # Создаем и запускаем бота
+    bot = TelegramSpyBot()
+    
+    try:
+        asyncio.run(bot.run())
+    except KeyboardInterrupt:
+        print("\n👋 Программа завершена пользователем")
+    except Exception as e:
+        print(f"\n❌ Фатальная ошибка: {e}")
+        import traceback
+        traceback.print_exc()
