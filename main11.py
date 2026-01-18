@@ -1,5 +1,3 @@
-[file name]: main9.py
-[file content begin]
 import asyncio
 import os
 import sys
