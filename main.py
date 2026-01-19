@@ -1,6 +1,7 @@
 import asyncio
 import re
 import os
+import sys
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional
@@ -14,25 +15,28 @@ from telethon.errors import FloodWaitError
 import logging
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Конфигурация
 API_ID = 123456  # Замените на ваш API ID
 API_HASH = 'ваш_api_hash'  # Замените на ваш API HASH
 BOT_TOKEN = 'ваш_бот_токен'  # Замените на токен вашего бота
-SESSION_NAME = '+380994588662'
+SESSION_NAME = '+380994588662'  # Имя вашей существующей сессии
 CHATS_FILE = 'chat.txt'
 
-# Инициализация клиента
+# Инициализация клиента - используем существующую сессию
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-bot = None
 
 # Глобальные переменные для хранения данных
 user_data_cache = {}
 message_cache = {}
 avatar_tracker = {}
 active_tracking = {}
+current_search = {}
 
 class UserSearchBot:
     def __init__(self):
@@ -46,29 +50,30 @@ class UserSearchBot:
     async def load_chats(self):
         """Загрузка чатов из файла"""
         try:
-            async with aiofiles.open(CHATS_FILE, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                # Извлекаем юзернеймы и ссылки
-                lines = content.strip().split('\n')
-                self.chats = []
-                for line in lines:
-                    line = line.strip()
-                    if line:
-                        # Извлекаем юзернейм из ссылки или используем как есть
-                        if 't.me/' in line:
-                            # Обрабатываем ссылки типа https://t.me/username или @username
-                            if 't.me/+' in line:
-                                # Для приватных ссылок оставляем как есть
+            if os.path.exists(CHATS_FILE):
+                async with aiofiles.open(CHATS_FILE, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    lines = content.strip().split('\n')
+                    self.chats = []
+                    for line in lines:
+                        line = line.strip()
+                        if line:
+                            if 't.me/' in line:
+                                if 't.me/+' in line:
+                                    self.chats.append(line)
+                                else:
+                                    username = line.split('t.me/')[-1].replace('@', '')
+                                    if username:
+                                        self.chats.append(f'@{username}')
+                            elif line.startswith('@'):
                                 self.chats.append(line)
                             else:
-                                # Извлекаем юзернейм после t.me/
-                                username = line.split('t.me/')[-1].replace('@', '')
-                                if username:
-                                    self.chats.append(f'@{username}')
-                        elif line.startswith('@'):
-                            self.chats.append(line)
-                        else:
-                            self.chats.append(f'@{line}')
+                                self.chats.append(f'@{line}')
+                logger.info(f"Загружено {len(self.chats)} чатов из файла")
+            else:
+                logger.warning(f"Файл {CHATS_FILE} не найден")
+                self.chats = []
+                
         except Exception as e:
             logger.error(f"Ошибка загрузки чатов: {e}")
             self.chats = []
@@ -76,14 +81,19 @@ class UserSearchBot:
     async def resolve_username(self, username: str):
         """Преобразование юзернейма в объект пользователя"""
         try:
-            # Убираем @ если есть
             username = username.replace('@', '').strip()
+            
+            # Пробуем разные способы поиска пользователя
             if username.startswith('+'):
-                # Если это номер телефона
+                # Номер телефона
                 return await client.get_input_entity(username)
+            elif username.isdigit():
+                # ID пользователя
+                return await client.get_entity(int(username))
             else:
-                # Если это юзернейм
+                # Юзернейм
                 return await client.get_entity(username)
+                
         except Exception as e:
             logger.error(f"Ошибка разрешения username {username}: {e}")
             return None
@@ -91,20 +101,32 @@ class UserSearchBot:
     async def search_user_in_chats(self, user_identifier: str):
         """Поиск пользователя во всех чатах"""
         try:
-            # Сначала пытаемся получить информацию о пользователе
+            logger.info(f"Начинаю поиск пользователя: {user_identifier}")
+            
+            # Сначала получаем информацию о пользователе
             self.target_user = await self.resolve_username(user_identifier)
             if not self.target_user:
-                return "Пользователь не найден"
+                return "❌ Пользователь не найден. Проверьте правильность ввода."
             
-            # Сохраняем информацию о пользователе
+            # Сохраняем информацию
             self.user_info = self.target_user
+            
+            # Очищаем предыдущие данные
+            self.user_messages.clear()
+            self.user_chats.clear()
+            self.message_count = 0
             
             # Загружаем чаты
             await self.load_chats()
             
+            if not self.chats:
+                return "⚠️ Не загружены чаты для поиска. Проверьте файл chat.txt"
+            
             total_chats = len(self.chats)
             found_in_chats = []
             total_messages = 0
+            
+            logger.info(f"Начинаю поиск в {total_chats} чатах...")
             
             # Поиск в каждом чате
             for i, chat in enumerate(self.chats, 1):
@@ -113,41 +135,42 @@ class UserSearchBot:
                     
                     # Получаем чат
                     chat_entity = None
-                    if chat.startswith('https://t.me/+'):
-                        # Для приватных ссылок
-                        chat_entity = await client.get_entity(chat)
-                    else:
-                        # Для публичных чатов
-                        chat_entity = await client.get_entity(chat)
+                    try:
+                        if chat.startswith('https://t.me/+'):
+                            chat_entity = await client.get_entity(chat)
+                        else:
+                            chat_entity = await client.get_entity(chat)
+                    except Exception as e:
+                        logger.warning(f"Не удалось получить чат {chat}: {e}")
+                        continue
                     
                     if not chat_entity:
                         continue
                     
-                    # Получаем сообщения
-                    messages_found = False
+                    # Ищем сообщения пользователя
                     message_count_in_chat = 0
-                    
                     try:
-                        # Быстрый поиск сообщений пользователя
+                        # Используем limit=None для поиска всех сообщений
                         async for message in client.iter_messages(
                             chat_entity,
                             from_user=self.target_user,
-                            limit=None  # Без лимита
+                            limit=None
                         ):
                             if message:
                                 message_count_in_chat += 1
                                 total_messages += 1
-                                self.user_messages[chat].append(message)
-                                messages_found = True
+                                chat_key = getattr(chat_entity, 'title', str(chat_entity.id))
+                                self.user_messages[chat_key].append(message)
                     except Exception as e:
-                        logger.error(f"Ошибка при получении сообщений из {chat}: {e}")
+                        logger.error(f"Ошибка при поиске сообщений в {chat}: {e}")
                         continue
                     
-                    if messages_found:
+                    if message_count_in_chat > 0:
                         found_in_chats.append({
                             'chat': chat,
                             'title': getattr(chat_entity, 'title', chat),
-                            'message_count': message_count_in_chat
+                            'message_count': message_count_in_chat,
+                            'entity': chat_entity
                         })
                         self.user_chats.append(chat_entity)
                         
@@ -158,27 +181,38 @@ class UserSearchBot:
             self.message_count = total_messages
             
             # Формируем результат
-            result = f"🔍 **Результаты поиска для {user_identifier}**\n\n"
-            result += f"👤 **Пользователь:** {getattr(self.target_user, 'first_name', '')} {getattr(self.target_user, 'last_name', '')}\n"
-            result += f"📱 **Username:** @{getattr(self.target_user, 'username', 'нет')}\n"
-            result += f"🆔 **ID:** {self.target_user.id}\n\n"
+            result = f"🔍 **Результаты поиска**\n\n"
+            
+            # Информация о пользователе
+            first_name = getattr(self.target_user, 'first_name', '')
+            last_name = getattr(self.target_user, 'last_name', '')
+            username = getattr(self.target_user, 'username', 'нет')
+            user_id = getattr(self.target_user, 'id', '')
+            
+            result += f"👤 **Пользователь:** {first_name} {last_name}\n"
+            result += f"📱 **Username:** @{username}\n"
+            result += f"🆔 **ID:** {user_id}\n\n"
+            
+            # Статистика
             result += f"📊 **Статистика:**\n"
-            result += f"• Найден в чатах: {len(found_in_chats)}/{total_chats}\n"
-            result += f"• Всего сообщений: {total_messages}\n\n"
+            result += f"• Найден в чатах: **{len(found_in_chats)}/{total_chats}**\n"
+            result += f"• Всего сообщений: **{total_messages}**\n\n"
             
             if found_in_chats:
-                result += "📋 **Чаты:**\n"
-                for chat_info in found_in_chats[:10]:  # Первые 10 чатов
+                result += "📋 **Найден в чатах:**\n"
+                for chat_info in found_in_chats[:5]:  # Первые 5 чатов
                     result += f"• {chat_info['title']}: {chat_info['message_count']} сообщ.\n"
                 
-                if len(found_in_chats) > 10:
-                    result += f"\n... и еще {len(found_in_chats) - 10} чатов"
+                if len(found_in_chats) > 5:
+                    result += f"\n... и еще {len(found_in_chats) - 5} чатов"
+            else:
+                result += "⚠️ Пользователь не найден ни в одном из чатов"
             
             return result
             
         except Exception as e:
             logger.error(f"Ошибка при поиске пользователя: {e}")
-            return f"Ошибка при поиске: {str(e)}"
+            return f"❌ Ошибка при поиске: {str(e)}"
 
     async def get_user_avatar(self):
         """Получение аватарки пользователя"""
@@ -186,14 +220,12 @@ class UserSearchBot:
             return None
         
         try:
-            # Получаем фото профиля
             photos = await client.get_profile_photos(self.target_user)
             if photos:
-                # Берем последнее фото
                 latest_photo = photos[0]
-                # Скачиваем фото
-                photo_path = await client.download_media(latest_photo, file=bytes)
-                return photo_path
+                # Скачиваем фото в память
+                photo_bytes = await client.download_media(latest_photo, file=bytes)
+                return photo_bytes
         except Exception as e:
             logger.error(f"Ошибка при получении аватарки: {e}")
         
@@ -202,64 +234,72 @@ class UserSearchBot:
     async def search_replies_to_user(self, target_username: str):
         """Поиск реплаев пользователя на другого пользователя"""
         try:
+            if not self.target_user:
+                return "❌ Сначала найдите пользователя!"
+            
             target_user = await self.resolve_username(target_username)
             if not target_user:
-                return "Целевой пользователь не найден"
-            
-            if not self.target_user:
-                return "Сначала найдите пользователя"
+                return f"❌ Пользователь @{target_username} не найден"
             
             replies = []
+            found_count = 0
             
-            # Ищем реплы во всех сохраненных сообщениях
+            # Ищем реплы во всех сообщениях
             for chat_name, messages in self.user_messages.items():
                 for message in messages:
                     if message.reply_to:
-                        # Получаем сообщение, на которое был реплай
                         try:
                             replied_msg = await client.get_messages(
                                 message.peer_id,
                                 ids=message.reply_to.reply_to_msg_id
                             )
                             if replied_msg and replied_msg.sender_id == target_user.id:
-                                # Формируем ссылку на сообщение
-                                chat = await client.get_entity(message.peer_id)
-                                chat_username = getattr(chat, 'username', None)
-                                if chat_username:
-                                    message_link = f"https://t.me/{chat_username}/{message.id}"
-                                else:
-                                    message_link = f"chat: {chat.title}, message: {message.id}"
-                                
-                                replies.append({
-                                    'chat': chat,
-                                    'message': message,
-                                    'link': message_link,
-                                    'text': message.text[:100] if message.text else ""
-                                })
+                                # Формируем ссылку
+                                try:
+                                    chat = await client.get_entity(message.peer_id)
+                                    chat_username = getattr(chat, 'username', None)
+                                    
+                                    if chat_username:
+                                        message_link = f"https://t.me/{chat_username}/{message.id}"
+                                    else:
+                                        message_link = f"chat_id: {chat.id}, message_id: {message.id}"
+                                    
+                                    replies.append({
+                                        'chat': chat,
+                                        'message': message,
+                                        'link': message_link,
+                                        'text': message.text[:100] if message.text else ""
+                                    })
+                                    found_count += 1
+                                    
+                                except Exception as e:
+                                    continue
                         except Exception as e:
                             continue
             
             # Формируем результат
-            result = f"🔁 **Реплаи {getattr(self.target_user, 'username', 'пользователя')} на @{target_username}**\n\n"
+            result = f"🔁 **Реплаи на @{target_username}**\n\n"
             
             if replies:
-                result += f"Найдено реплаев: {len(replies)}\n\n"
-                for i, reply in enumerate(replies[:20], 1):  # Первые 20 реплаев
-                    result += f"{i}. [{reply['chat'].title}]({reply['link']})\n"
+                result += f"✅ Найдено реплаев: **{found_count}**\n\n"
+                
+                for i, reply in enumerate(replies[:15], 1):
+                    chat_title = getattr(reply['chat'], 'title', 'Неизвестный чат')
+                    result += f"{i}. [{chat_title}]({reply['link']})\n"
                     if reply['text']:
                         result += f"   📝 {reply['text']}...\n"
                     result += "\n"
                 
-                if len(replies) > 20:
-                    result += f"\n... и еще {len(replies) - 20} реплаев"
+                if len(replies) > 15:
+                    result += f"\n... и еще {len(replies) - 15} реплаев"
             else:
-                result += "Реплаев не найдено"
+                result += "❌ Реплаев не найдено"
             
             return result
             
         except Exception as e:
             logger.error(f"Ошибка при поиске реплаев: {e}")
-            return f"Ошибка при поиске реплаев: {str(e)}"
+            return f"❌ Ошибка при поиске реплаев: {str(e)}"
 
     async def get_all_messages_links(self, page: int = 0, per_page: int = 10):
         """Получение всех ссылок на сообщения с пагинацией"""
@@ -278,9 +318,9 @@ class UserSearchBot:
                     
                     all_messages.append({
                         'link': message_link,
-                        'chat': chat.title,
+                        'chat': getattr(chat, 'title', chat_name),
                         'date': message.date,
-                        'text': message.text[:50] if message.text else ""
+                        'text': message.text[:100] if message.text else ""
                     })
                 except Exception as e:
                     continue
@@ -289,27 +329,32 @@ class UserSearchBot:
         all_messages.sort(key=lambda x: x['date'], reverse=True)
         
         # Пагинация
+        total_messages = len(all_messages)
         start_idx = page * per_page
-        end_idx = start_idx + per_page
+        end_idx = min(start_idx + per_page, total_messages)
         page_messages = all_messages[start_idx:end_idx]
         
-        result = f"📨 **Все сообщения пользователя**\n\n"
-        result += f"Страница {page + 1} (сообщения {start_idx + 1}-{min(end_idx, len(all_messages))} из {len(all_messages)})\n\n"
+        result = f"📨 **Сообщения пользователя**\n\n"
+        result += f"📄 Страница {page + 1}\n"
+        result += f"📊 Сообщения {start_idx + 1}-{end_idx} из {total_messages}\n\n"
         
         for i, msg in enumerate(page_messages, start_idx + 1):
             result += f"{i}. [{msg['chat']}]({msg['link']})\n"
             if msg['text']:
-                result += f"   {msg['text']}...\n"
-            result += f"   📅 {msg['date'].strftime('%Y-%m-%d %H:%M')}\n\n"
+                result += f"   📝 {msg['text']}...\n"
+            result += f"   📅 {msg['date'].strftime('%d.%m.%Y %H:%M')}\n\n"
         
         # Кнопки пагинации
         buttons = []
         if page > 0:
-            buttons.append(Button.inline("⬅️ Назад", f"msgs_page_{page-1}"))
-        if end_idx < len(all_messages):
-            buttons.append(Button.inline("Вперед ➡️", f"msgs_page_{page+1}"))
+            buttons.append(Button.inline("⬅️ Назад", f"msgs_{page-1}"))
         
-        return result, buttons
+        buttons.append(Button.inline(f"📄 {page+1}", "current_page"))
+        
+        if end_idx < total_messages:
+            buttons.append(Button.inline("Вперед ➡️", f"msgs_{page+1}"))
+        
+        return result, [buttons]
 
     async def get_all_chats(self, page: int = 0, per_page: int = 10):
         """Получение всех чатов пользователя с пагинацией"""
@@ -323,308 +368,331 @@ class UserSearchBot:
                 unique_chats.append(chat_entity)
         
         # Пагинация
+        total_chats = len(unique_chats)
         start_idx = page * per_page
-        end_idx = start_idx + per_page
+        end_idx = min(start_idx + per_page, total_chats)
         page_chats = unique_chats[start_idx:end_idx]
         
         result = f"👥 **Чаты пользователя**\n\n"
-        result += f"Страница {page + 1} (чаты {start_idx + 1}-{min(end_idx, len(unique_chats))} из {len(unique_chats)})\n\n"
+        result += f"📄 Страница {page + 1}\n"
+        result += f"📊 Чаты {start_idx + 1}-{end_idx} из {total_chats}\n\n"
         
         for i, chat in enumerate(page_chats, start_idx + 1):
             title = getattr(chat, 'title', 'Без названия')
             members = getattr(chat, 'participants_count', '?')
+            username = getattr(chat, 'username', 'нет')
+            
+            # Считаем сообщения в этом чате
+            chat_key = getattr(chat, 'title', str(chat.id))
+            msg_count = len(self.user_messages.get(chat_key, []))
+            
             result += f"{i}. **{title}**\n"
+            result += f"   👤 @{username}\n"
             result += f"   👥 Участников: {members}\n"
-            result += f"   📝 Сообщений: {len(self.user_messages.get(str(chat.id), []))}\n\n"
+            result += f"   💬 Сообщений: {msg_count}\n\n"
         
         # Кнопки пагинации
         buttons = []
         if page > 0:
-            buttons.append(Button.inline("⬅️ Назад", f"chats_page_{page-1}"))
-        if end_idx < len(unique_chats):
-            buttons.append(Button.inline("Вперед ➡️", f"chats_page_{page+1}"))
+            buttons.append(Button.inline("⬅️ Назад", f"chats_{page-1}"))
         
-        return result, buttons
+        buttons.append(Button.inline(f"📄 {page+1}", "current_page"))
+        
+        if end_idx < total_chats:
+            buttons.append(Button.inline("Вперед ➡️", f"chats_{page+1}"))
+        
+        return result, [buttons]
+
+# Создаем экземпляр бота
+bot = UserSearchBot()
 
 async def start_bot():
     """Запуск бота"""
-    await client.start()
-    logger.info("Клиент запущен")
-    
-    # Создаем экземпляр бота
-    global bot
-    bot = UserSearchBot()
-    
-    @client.on(events.NewMessage(pattern='/start'))
-    async def start_handler(event):
-        """Обработчик команды /start"""
-        buttons = [
-            [Button.inline("🔍 Поиск пользователя", "search_user")],
-            [Button.inline("ℹ️ О боте", "about")]
-        ]
-        await event.respond(
-            "👋 **Добро пожаловать в UserSearchBot!**\n\n"
-            "Я могу искать пользователей в чатах, анализировать их активность "
-            "и отслеживать изменения.\n\n"
-            "Нажмите кнопку ниже для начала поиска:",
-            buttons=buttons
-        )
-    
-    @client.on(events.NewMessage(pattern='/search'))
-    async def search_handler(event):
-        """Обработчик команды /search"""
-        await event.respond(
-            "🔍 **Поиск пользователя**\n\n"
-            "Отправьте мне юзернейм или номер телефона пользователя, "
-            "которого нужно найти (например: @username или +380123456789):"
-        )
-    
-    @client.on(events.CallbackQuery())
-    async def callback_handler(event):
-        """Обработчик inline кнопок"""
-        try:
-            data = event.data.decode('utf-8')
-            chat_id = event.chat_id
-            message_id = event.message_id
+    try:
+        # Подключаемся с использованием существующей сессии
+        await client.start(bot_token=BOT_TOKEN)
+        logger.info("✅ Бот успешно запущен!")
+        
+        me = await client.get_me()
+        logger.info(f"🤖 Бот авторизован как: @{me.username}")
+        
+        @client.on(events.NewMessage(pattern='/start'))
+        async def start_handler(event):
+            """Обработчик команды /start"""
+            buttons = [
+                [Button.inline("🔍 Поиск пользователя", "search_user")],
+                [Button.inline("ℹ️ Помощь", "help_info")]
+            ]
             
-            if data == "search_user":
-                await event.edit(
-                    "🔍 **Поиск пользователя**\n\n"
-                    "Отправьте мне юзернейм или номер телефона пользователя, "
-                    "которого нужно найти:"
-                )
-            
-            elif data == "about":
-                await event.edit(
-                    "🤖 **UserSearchBot**\n\n"
-                    "Бот для поиска и анализа пользователей в Telegram чатах.\n\n"
-                    "**Функции:**\n"
-                    "• Поиск пользователя по юзернейму/номеру\n"
-                    "• Статистика по чатам и сообщениям\n"
-                    "• Поиск реплаев на других пользователей\n"
-                    "• Просмотр всех сообщений пользователя\n"
-                    "• Отслеживание изменений аватарки\n\n"
-                    "Для начала работы нажмите 'Поиск пользователя'",
-                    buttons=[[Button.inline("🔍 Начать поиск", "search_user")]]
-                )
-            
-            elif data.startswith("user_found_"):
-                # Кнопки после успешного поиска пользователя
-                user_id = data.split("_")[2]
-                buttons = [
-                    [
-                        Button.inline("👥 Группы", "show_groups"),
-                        Button.inline("📨 Сообщения", "show_messages")
-                    ],
-                    [
-                        Button.inline("🔁 Взаимодействия", "interactions"),
-                        Button.inline("👤 Следить за пользователем", "track_user")
-                    ],
-                    [
-                        Button.inline("🖼️ Следить за аватаркой", "track_avatar"),
-                        Button.inline("🔄 Обновить данные", f"refresh_{user_id}")
-                    ]
-                ]
-                
-                # Добавляем аватарку если есть
-                avatar = await bot.get_user_avatar()
-                if avatar:
-                    await event.delete()
-                    await event.respond(
-                        file=avatar,
-                        caption=f"👤 **Найден пользователь:** {getattr(bot.target_user, 'first_name', '')}\n"
-                               f"📱 @{getattr(bot.target_user, 'username', 'нет')}\n\n"
-                               f"**Выберите действие:**",
-                        buttons=buttons
-                    )
-                else:
-                    await event.edit(
-                        f"👤 **Найден пользователь:** {getattr(bot.target_user, 'first_name', '')}\n"
-                        f"📱 @{getattr(bot.target_user, 'username', 'нет')}\n\n"
-                        f"**Выберите действие:**",
-                        buttons=buttons
-                    )
-            
-            elif data == "show_groups":
-                # Показать группы с пагинацией
-                result, buttons = await bot.get_all_chats(page=0)
-                await event.edit(result, buttons=buttons, link_preview=False)
-            
-            elif data.startswith("chats_page_"):
-                # Пагинация чатов
-                page = int(data.split("_")[2])
-                result, buttons = await bot.get_all_chats(page=page)
-                await event.edit(result, buttons=buttons, link_preview=False)
-            
-            elif data == "show_messages":
-                # Показать сообщения с пагинацией
-                result, buttons = await bot.get_all_messages_links(page=0)
-                await event.edit(result, buttons=buttons, link_preview=False)
-            
-            elif data.startswith("msgs_page_"):
-                # Пагинация сообщений
-                page = int(data.split("_")[2])
-                result, buttons = await bot.get_all_messages_links(page=page)
-                await event.edit(result, buttons=buttons, link_preview=False)
-            
-            elif data == "interactions":
-                # Меню взаимодействий
-                buttons = [
-                    [Button.inline("🔍 Найти реплаи", "find_replies")],
-                    [Button.inline("📊 Статистика", "interaction_stats")],
-                    [Button.inline("🔙 Назад", "back_to_main")]
-                ]
-                await event.edit(
-                    "🔁 **Взаимодействия пользователя**\n\n"
-                    "Выберите тип взаимодействий для анализа:",
-                    buttons=buttons
-                )
-            
-            elif data == "find_replies":
-                await event.edit(
-                    "🔍 **Поиск реплаев**\n\n"
-                    "Введите юзернейм пользователя, на которого ищем реплаи "
-                    "(например: @username):"
-                )
-            
-            elif data == "back_to_main":
-                # Возврат к главному меню
-                buttons = [
-                    [
-                        Button.inline("👥 Группы", "show_groups"),
-                        Button.inline("📨 Сообщения", "show_messages")
-                    ],
-                    [
-                        Button.inline("🔁 Взаимодействия", "interactions"),
-                        Button.inline("👤 Следить за пользователем", "track_user")
-                    ],
-                    [
-                        Button.inline("🖼️ Следить за аватаркой", "track_avatar"),
-                        Button.inline("🔄 Обновить данные", f"refresh_{bot.target_user.id}")
-                    ]
-                ]
-                await event.edit(
-                    f"👤 **Пользователь:** {getattr(bot.target_user, 'first_name', '')}\n"
-                    f"📱 @{getattr(bot.target_user, 'username', 'нет')}\n\n"
-                    f"**Выберите действие:**",
-                    buttons=buttons
-                )
-            
-            elif data == "track_avatar":
-                # Начать отслеживание аватарки
-                if bot.target_user:
-                    user_id = bot.target_user.id
-                    if user_id not in avatar_tracker:
-                        avatar_tracker[user_id] = {
-                            'last_avatar': None,
-                            'last_check': datetime.now(),
-                            'chat_id': chat_id
-                        }
-                        await event.edit(
-                            "✅ **Отслеживание аватарки начато**\n\n"
-                            "Я буду проверять аватарку каждые 30 минут "
-                            "и присылать уведомление, если она изменится."
-                        )
-                        
-                        # Запускаем задачу отслеживания
-                        asyncio.create_task(track_avatar_changes(user_id))
-                    else:
-                        await event.edit("⚠️ Отслеживание аватарки уже активно!")
-            
-            elif data.startswith("refresh_"):
-                # Обновить данные пользователя
-                await event.edit("🔄 Обновление данных...")
-                result = await bot.search_user_in_chats(
-                    getattr(bot.target_user, 'username', f"user{bot.target_user.id}")
-                )
-                buttons = [[Button.inline("🔍 Показать детали", f"user_found_{bot.target_user.id}")]]
-                await event.edit(result, buttons=buttons)
-            
-            await event.answer()
-            
-        except Exception as e:
-            logger.error(f"Ошибка в callback: {e}")
-            await event.answer("Произошла ошибка", alert=True)
-    
-    @client.on(events.NewMessage())
-    async def message_handler(event):
-        """Обработчик текстовых сообщений"""
-        try:
-            text = event.message.text.strip()
-            
-            if event.is_private and not text.startswith('/'):
-                # Если это поиск пользователя
-                if not bot.target_user or "поиск" in event.message.text.lower():
-                    await event.respond("🔍 Идет поиск пользователя...")
+            await event.respond(
+                "👋 **Добро пожаловать в UserSearchBot!**\n\n"
+                "Я могу искать пользователей в чатах и анализировать их активность.\n\n"
+                "**Основные функции:**\n"
+                "• Поиск пользователя по юзернейму\n"
+                "• Просмотр всех сообщений пользователя\n"
+                "• Поиск реплаев на других пользователей\n"
+                "• Отслеживание аватарки\n\n"
+                "Нажмите кнопку ниже для начала:",
+                buttons=buttons
+            )
+        
+        @client.on(events.NewMessage(pattern='/search'))
+        async def search_handler(event):
+            """Обработчик команды /search"""
+            await event.respond(
+                "🔍 **Поиск пользователя**\n\n"
+                "Отправьте мне юзернейм или ID пользователя для поиска:\n\n"
+                "Примеры:\n"
+                "• @username\n"
+                "• +380123456789\n"
+                "• 123456789 (ID)"
+            )
+        
+        @client.on(events.NewMessage(pattern='/help'))
+        async def help_handler(event):
+            """Обработчик команды /help"""
+            await event.respond(
+                "📚 **Помощь по командам:**\n\n"
+                "`/start` - Запустить бота\n"
+                "`/search` - Начать поиск пользователя\n"
+                "`/help` - Показать это сообщение\n\n"
+                "**Как использовать:**\n"
+                "1. Нажмите 'Поиск пользователя'\n"
+                "2. Отправьте юзернейм пользователя\n"
+                "3. Выберите действие из меню\n\n"
+                "**Файл чатов:**\n"
+                "Добавьте чаты для поиска в файл `chat.txt`"
+            )
+        
+        @client.on(events.NewMessage())
+        async def message_handler(event):
+            """Обработчик текстовых сообщений"""
+            try:
+                if event.is_private and not event.message.text.startswith('/'):
+                    text = event.message.text.strip()
+                    chat_id = event.chat_id
+                    
+                    # Сохраняем текущий поиск для этого чата
+                    current_search[chat_id] = text
+                    
+                    # Ищем пользователя
+                    await event.respond("🔄 Ищу пользователя...")
                     result = await bot.search_user_in_chats(text)
                     
-                    if "найден" in result.lower() or "результаты" in result.lower():
-                        buttons = [[Button.inline("🔍 Показать детали", f"user_found_{bot.target_user.id}")]]
-                        await event.respond(result, buttons=buttons)
+                    if bot.target_user:
+                        # Формируем меню действий
+                        buttons = [
+                            [
+                                Button.inline("👥 Группы", "show_groups"),
+                                Button.inline("📨 Сообщения", "show_messages_0")
+                            ],
+                            [
+                                Button.inline("🔁 Взаимодействия", "interactions"),
+                                Button.inline("🖼️ Аватарка", "get_avatar")
+                            ],
+                            [
+                                Button.inline("🔄 Обновить", "refresh_search"),
+                                Button.inline("📊 Статистика", "show_stats")
+                            ]
+                        ]
+                        
+                        # Пытаемся получить аватарку
+                        avatar = await bot.get_user_avatar()
+                        
+                        if avatar:
+                            await event.delete()
+                            await event.respond(
+                                file=avatar,
+                                caption=result,
+                                buttons=buttons
+                            )
+                        else:
+                            await event.respond(result, buttons=buttons)
                     else:
                         await event.respond(result)
-                
-                # Если это поиск реплаев
-                elif "реплаи" in event.message.reply_to_msg.text.lower() if event.message.reply_to else False:
-                    await event.respond("🔍 Ищем реплаи...")
-                    result = await bot.search_replies_to_user(text)
-                    await event.respond(result, link_preview=False)
+                        
+            except Exception as e:
+                logger.error(f"Ошибка обработки сообщения: {e}")
+                await event.respond(f"❌ Ошибка: {str(e)}")
         
-        except Exception as e:
-            logger.error(f"Ошибка обработки сообщения: {e}")
-            await event.respond(f"Ошибка: {str(e)}")
-
-async def track_avatar_changes(user_id):
-    """Фоновая задача для отслеживания изменений аватарки"""
-    while user_id in avatar_tracker:
-        try:
-            tracker = avatar_tracker[user_id]
-            
-            # Проверяем каждые 30 минут
-            await asyncio.sleep(1800)  # 30 минут
-            
-            # Получаем текущую аватарку
-            user = await client.get_entity(user_id)
-            photos = await client.get_profile_photos(user)
-            
-            current_avatar = photos[0] if photos else None
-            
-            if tracker['last_avatar'] is None:
-                # Первая проверка
-                tracker['last_avatar'] = current_avatar
-            elif current_avatar and tracker['last_avatar'].id != current_avatar.id:
-                # Аватарка изменилась
-                # Скачиваем новую аватарку
-                new_avatar = await client.download_media(current_avatar, file=bytes)
+        @client.on(events.CallbackQuery())
+        async def callback_handler(event):
+            """Обработчик inline кнопок"""
+            try:
+                data = event.data.decode('utf-8')
+                chat_id = event.chat_id
                 
-                # Отправляем уведомление
-                await client.send_message(
-                    tracker['chat_id'],
-                    f"🔄 **Аватарка пользователя изменилась!**\n\n"
-                    f"Пользователь: @{getattr(user, 'username', 'без username')}",
-                    file=new_avatar
-                )
+                if data == "search_user":
+                    await event.edit(
+                        "🔍 **Поиск пользователя**\n\n"
+                        "Отправьте мне юзернейм или ID пользователя:"
+                    )
                 
-                tracker['last_avatar'] = current_avatar
-            
-            tracker['last_check'] = datetime.now()
-            
-        except Exception as e:
-            logger.error(f"Ошибка отслеживания аватарки: {e}")
-            await asyncio.sleep(300)  # Ждем 5 минут при ошибке
+                elif data == "help_info":
+                    await event.edit(
+                        "📚 **Помощь**\n\n"
+                        "**Как использовать:**\n"
+                        "1. Отправьте юзернейм пользователя\n"
+                        "2. Выберите действие из меню\n\n"
+                        "**Доступные действия:**\n"
+                        "• 👥 Группы - все чаты пользователя\n"
+                        "• 📨 Сообщения - все сообщения\n"
+                        "• 🔁 Взаимодействия - поиск реплаев\n"
+                        "• 🖼️ Аватарка - фото профиля\n"
+                        "• 🔄 Обновить - обновить данные\n"
+                        "• 📊 Статистика - детальная статистика",
+                        buttons=[[Button.inline("🔍 Начать поиск", "search_user")]]
+                    )
+                
+                elif data.startswith("show_messages_"):
+                    # Показать сообщения с пагинацией
+                    page = int(data.split('_')[-1])
+                    result, buttons = await bot.get_all_messages_links(page=page)
+                    await event.edit(result, buttons=buttons, link_preview=True)
+                
+                elif data.startswith("msgs_"):
+                    # Пагинация сообщений
+                    page = int(data.split('_')[-1])
+                    result, buttons = await bot.get_all_messages_links(page=page)
+                    await event.edit(result, buttons=buttons, link_preview=True)
+                
+                elif data == "show_groups":
+                    # Показать группы
+                    result, buttons = await bot.get_all_chats(page=0)
+                    await event.edit(result, buttons=buttons)
+                
+                elif data.startswith("chats_"):
+                    # Пагинация чатов
+                    page = int(data.split('_')[-1])
+                    result, buttons = await bot.get_all_chats(page=page)
+                    await event.edit(result, buttons=buttons)
+                
+                elif data == "interactions":
+                    # Меню взаимодействий
+                    buttons = [
+                        [Button.inline("🔍 Найти реплаи", "find_replies")],
+                        [Button.inline("📊 Статистика ответов", "reply_stats")],
+                        [Button.inline("🔙 Назад", "back_to_main")]
+                    ]
+                    await event.edit(
+                        "🔁 **Взаимодействия**\n\n"
+                        "Выберите действие:",
+                        buttons=buttons
+                    )
+                
+                elif data == "find_replies":
+                    await event.edit(
+                        "🔍 **Поиск реплаев**\n\n"
+                        "Введите юзернейм пользователя, на которого ищем реплаи:\n\n"
+                        "Пример: @username"
+                    )
+                
+                elif data == "get_avatar":
+                    # Получить аватарку
+                    avatar = await bot.get_user_avatar()
+                    if avatar:
+                        await event.delete()
+                        await event.respond(
+                            file=avatar,
+                            caption="🖼️ **Аватарка пользователя**"
+                        )
+                    else:
+                        await event.answer("❌ Аватарка не найдена", alert=True)
+                
+                elif data == "refresh_search":
+                    # Обновить поиск
+                    if chat_id in current_search:
+                        await event.edit("🔄 Обновляю данные...")
+                        result = await bot.search_user_in_chats(current_search[chat_id])
+                        
+                        if bot.target_user:
+                            buttons = [
+                                [
+                                    Button.inline("👥 Группы", "show_groups"),
+                                    Button.inline("📨 Сообщения", "show_messages_0")
+                                ],
+                                [
+                                    Button.inline("🔁 Взаимодействия", "interactions"),
+                                    Button.inline("🖼️ Аватарка", "get_avatar")
+                                ]
+                            ]
+                            await event.edit(result, buttons=buttons)
+                        else:
+                            await event.edit(result)
+                    else:
+                        await event.answer("❌ Нет данных для обновления", alert=True)
+                
+                elif data == "show_stats":
+                    # Показать статистику
+                    if bot.target_user:
+                        result = f"📊 **Статистика пользователя**\n\n"
+                        result += f"👤 {getattr(bot.target_user, 'first_name', '')} "
+                        result += f"{getattr(bot.target_user, 'last_name', '')}\n"
+                        result += f"📱 @{getattr(bot.target_user, 'username', 'нет')}\n\n"
+                        result += f"📈 **Общая статистика:**\n"
+                        result += f"• Чатов: {len(bot.user_chats)}\n"
+                        result += f"• Сообщений: {bot.message_count}\n"
+                        result += f"• Уникальных чатов: {len(bot.user_messages)}\n"
+                        
+                        await event.edit(result)
+                    else:
+                        await event.answer("❌ Сначала найдите пользователя", alert=True)
+                
+                elif data == "back_to_main":
+                    # Вернуться к главному меню
+                    if bot.target_user:
+                        result = f"👤 **Пользователь найден**\n\n"
+                        result += f"Имя: {getattr(bot.target_user, 'first_name', '')}\n"
+                        result += f"Username: @{getattr(bot.target_user, 'username', 'нет')}\n"
+                        result += f"Сообщений: {bot.message_count}\n"
+                        result += f"Чатов: {len(bot.user_chats)}\n\n"
+                        result += "**Выберите действие:**"
+                        
+                        buttons = [
+                            [
+                                Button.inline("👥 Группы", "show_groups"),
+                                Button.inline("📨 Сообщения", "show_messages_0")
+                            ],
+                            [
+                                Button.inline("🔁 Взаимодействия", "interactions"),
+                                Button.inline("🖼️ Аватарка", "get_avatar")
+                            ]
+                        ]
+                        
+                        await event.edit(result, buttons=buttons)
+                
+                elif data == "current_page":
+                    # Текущая страница - ничего не делаем
+                    await event.answer()
+                
+                await event.answer()
+                
+            except Exception as e:
+                logger.error(f"Ошибка в callback: {e}")
+                await event.answer("❌ Произошла ошибка", alert=True)
+        
+        logger.info("✅ Бот готов к работе!")
+        await client.run_until_disconnected()
+        
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}")
+        raise
 
 async def main():
     """Главная функция"""
     try:
         await start_bot()
-        logger.info("Бот запущен и готов к работе!")
-        
-        # Запускаем бота
-        await client.run_until_disconnected()
-        
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен")
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+        logger.error(f"Фатальная ошибка: {e}")
 
 if __name__ == '__main__':
     # Запуск бота
+    print("🚀 Запуск UserSearchBot...")
+    print(f"📁 Используется сессия: {SESSION_NAME}")
+    print("📝 Убедитесь, что файл chat.txt с чатами создан")
+    print("⏳ Подключение к Telegram...")
+    
+    # Запускаем бота
     asyncio.run(main())
