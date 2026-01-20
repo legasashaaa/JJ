@@ -637,8 +637,9 @@ class TelegramSpyBot:
                 return
             
             # Отправляем красивое уведомление о прогрессе
-            progress_msg = await self.send_bot_message(chat_id, "🔍 Сканирую диалоги... 📊 0%")
+            await self.send_bot_message(chat_id, "🔍 Сканирую диалоги... 📊 0%")
             last_update = time.time()
+            start_time = time.time()  # Добавлено определение start_time
             
             user = await self.client.get_entity(PeerUser(user_id))
             user_chats = []
@@ -1119,7 +1120,7 @@ class TelegramSpyBot:
         """Показывает количество сообщений пользователя во всех чатах"""
         try:
             # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю подсчёт сообщений... 📊 0%")
+            await self.send_bot_message(chat_id, "📊 Начинаю подсчёт сообщений... 📊 0%")
             last_update = time.time()
             start_time = time.time()
             
@@ -1332,7 +1333,7 @@ class TelegramSpyBot:
             )
             
             # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю поиск... 📊 0%")
+            await self.send_bot_message(chat_id, "📊 Начинаю поиск... 📊 0%")
             last_update = time.time()
             start_time = time.time()
             
@@ -1998,7 +1999,7 @@ class TelegramSpyBot:
             )
             
             # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "🔍 Начинаю поиск... 📊 0%")
+            await self.send_bot_message(chat_id, "🔍 Начинаю поиск... 📊 0%")
             last_update = time.time()
             start_time = time.time()
             
@@ -2232,7 +2233,7 @@ class TelegramSpyBot:
             await self.send_bot_message(chat_id, "🔍 Собираю данные о всех реплаях пользователя...")
             
             # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю сбор... 📊 0%")
+            await self.send_bot_message(chat_id, "📊 Начинаю сбор... 📊 0%")
             last_update = time.time()
             start_time = time.time()
             
