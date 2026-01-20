@@ -1,5 +1,3 @@
-[file name]: main14.py
-[file content begin]
 import asyncio
 import os
 import sys
@@ -650,7 +648,7 @@ class TelegramSpyBot:
                 await self.send_bot_message(chat_id, f"❌ Ошибка: {error_msg[:100]}")
     
     async def load_user_chats(self, chat_id: int, user_id: int):
-        """Быстро загружает чаты пользователя (по запросу) и показывает их"""
+        """Быстро загружает чаты пользователя (по запросу)"""
         try:
             if user_id not in self.monitored_users:
                 await self.send_bot_message(chat_id, "❌ Пользователь не найден")
@@ -660,20 +658,24 @@ class TelegramSpyBot:
             
             # Если уже загружены, просто показываем
             if profile.user_chats_loaded and profile.user_chats:
-                await self.show_user_chats(chat_id, user_id, 0)  # Показываем первую страницу
+                await self.show_user_actions_with_chats(chat_id, user_id)
                 return
             
             # Отправляем красивое уведомление о прогрессе
-            progress_msg = await self.send_bot_message(chat_id, "🔍 Сканирую диалоги... 📊 0%")
-            last_update = time.time()
-            start_time = time.time()
+            await self.send_bot_message(chat_id, "🔍 Сканирую диалоги... 📊 0%")
             
             user = await self.client.get_entity(PeerUser(user_id))
             user_chats = []
             
             # Получаем все диалоги
-            dialogs = await self.client.get_dialogs()
+            dialogs = await self.client.get_dialogs(limit=50)  # Ограничим для производительности
             total_dialogs = len(dialogs)
+            
+            if total_dialogs == 0:
+                await self.send_bot_message(chat_id, "❌ Не найдено диалогов")
+                return
+            
+            checked_count = 0
             
             for dialog_idx, dialog in enumerate(dialogs):
                 try:
@@ -681,27 +683,26 @@ class TelegramSpyBot:
                     if dialog.is_channel and not dialog.is_group:
                         continue
                     
-                    # Обновляем прогресс каждые 5 секунд или каждые 10 диалогов
-                    current_time = time.time()
-                    if current_time - last_update > 5 or dialog_idx % 10 == 0:
+                    # Обновляем прогресс каждые 10 диалогов
+                    if dialog_idx % 10 == 0:
                         progress = (dialog_idx / total_dialogs) * 100
                         emoji_progress = self.get_progress_emoji(progress)
                         await self.send_bot_message(chat_id, 
                             f"🔍 Сканирую диалоги... {emoji_progress} {progress:.1f}%\n"
                             f"📊 Обработано: {dialog_idx}/{total_dialogs} диалогов\n"
                             f"✅ Найдено чатов: {len(user_chats)}")
-                        last_update = current_time
                     
                     # Проверяем есть ли пользователь в чате/группе
                     if dialog.is_group or dialog.is_channel:
                         # Для групп и супергрупп
                         try:
-                            # Проверяем сообщения пользователя без лимита
+                            # Проверяем сообщения пользователя с лимитом
                             message_count = 0
                             try:
                                 async for message in self.client.iter_messages(
                                     dialog.entity,
-                                    from_user=user
+                                    from_user=user,
+                                    limit=50  # Ограничим для производительности
                                 ):
                                     message_count += 1
                             except:
@@ -728,9 +729,9 @@ class TelegramSpyBot:
                             chat_name = dialog.name
                             chat_link = await self.get_chat_link(dialog.entity)
                             
-                            # Подсчет сообщений в личном чате без лимита
+                            # Подсчет сообщений в личном чате с лимитом
                             total_messages = 0
-                            async for _ in self.client.iter_messages(dialog.entity):
+                            async for _ in self.client.iter_messages(dialog.entity, limit=100):
                                 total_messages += 1
                             
                             user_chats.append({
@@ -740,6 +741,9 @@ class TelegramSpyBot:
                                 'message_count': total_messages,
                                 'last_activity': datetime.now()
                             })
+                    
+                    checked_count += 1
+                    await asyncio.sleep(0.1)  # Пауза между обработкой диалогов
                 
                 except Exception as e:
                     continue
@@ -757,18 +761,15 @@ class TelegramSpyBot:
                 f"✅ <b>Сканирование завершено!</b>\n\n"
                 f"📊 Всего диалогов: {total_dialogs}\n"
                 f"💬 Найдено чатов: {len(user_chats)}\n"
-                f"⏱ Время выполнения: {time.time() - start_time:.1f} сек"
+                f"✅ Проверено: {checked_count}"
             )
             
-            # Показываем загруженные чаты с пагинацией
-            if user_chats:
-                await self.show_user_chats(chat_id, user_id, 0)
-            else:
-                await self.send_bot_message(chat_id, "📭 У пользователя не найдено чатов")
+            # Показываем действия с чатами
+            await self.show_user_actions_with_chats(chat_id, user_id)
             
         except Exception as e:
             print(f"Ошибка загрузки чатов: {e}")
-            await self.send_bot_message(chat_id, f"❌ Ошибка загрузки чатов: {str(e)[:100]}")
+            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
     
     def get_progress_emoji(self, percentage: float) -> str:
         """Возвращает эмодзи для индикатора прогресса"""
@@ -896,7 +897,7 @@ class TelegramSpyBot:
                 return
             
             # Разбиваем на страницы
-            items_per_page = 10
+            items_per_page = 8
             total_pages = (len(profile.user_chats) + items_per_page - 1) // items_per_page
             
             if page >= total_pages:
@@ -919,9 +920,7 @@ class TelegramSpyBot:
             
             # Добавляем чаты текущей страницы
             for i, chat in enumerate(sorted_chats[start_idx:end_idx], start_idx + 1):
-                # Форматируем количество сообщений с разделителями тысяч
-                message_count = f"{chat['message_count']:,}"
-                message_text += f"{i}. <a href='{chat['link']}'>{chat['name']}</a> - {message_count} сообщ.\n"
+                message_text += f"{i}. <a href='{chat['link']}'>{chat['name']}</a> - {chat['message_count']} сообщ.\n"
             
             # Создаем клавиатуру с пагинацией
             keyboard_buttons = []
@@ -931,7 +930,7 @@ class TelegramSpyBot:
             if page > 0:
                 nav_buttons.append({"text": "⬅️ Назад", "callback_data": f"show_user_chats:{user_id}:{page-1}"})
             
-            nav_buttons.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": f"show_user_chats:{user_id}:{page}"})
+            nav_buttons.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": f"noop"})
             
             if page < total_pages - 1:
                 nav_buttons.append({"text": "Вперёд ➡️", "callback_data": f"show_user_chats:{user_id}:{page+1}"})
@@ -1156,10 +1155,7 @@ class TelegramSpyBot:
     async def show_message_count(self, chat_id: int, user_id: int):
         """Показывает количество сообщений пользователя во всех чатах"""
         try:
-            # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю подсчёт сообщений... 📊 0%")
-            last_update = time.time()
-            start_time = time.time()
+            await self.send_bot_message(chat_id, "📊 Начинаю подсчёт сообщений...")
             
             # Получаем пользователя
             try:
@@ -1184,20 +1180,17 @@ class TelegramSpyBot:
             chat_stats = []
             checked_chats = 0
             
-            # Проверяем каждый чат
+            # Проверяем каждый чат с ограничением
             for i, chat_identifier in enumerate(chats, 1):
                 try:
-                    # Обновляем прогресс каждые 5 секунд или каждые 5 чатов
-                    current_time = time.time()
-                    if current_time - last_update > 5 or i % 5 == 0:
+                    if i % 5 == 0:  # Отправляем прогресс каждые 5 чатов
                         progress = (i / len(chats)) * 100
                         emoji_progress = self.get_progress_emoji(progress)
                         await self.send_bot_message(chat_id, 
                             f"📊 Считаю сообщения... {emoji_progress} {progress:.1f}%\n"
                             f"📁 Обработано: {i}/{len(chats)} чатов\n"
-                            f"💬 Найдено сообщений: {total_messages}\n"
-                            f"✅ Чатов с сообщениями: {len(chat_stats)}")
-                        last_update = current_time
+                            f"💬 Найдено сообщений: {total_messages}"
+                        )
                     
                     # Получаем чат
                     chat = await self.get_chat_by_identifier(chat_identifier)
@@ -1206,17 +1199,17 @@ class TelegramSpyBot:
                     
                     checked_chats += 1
                     
-                    # Получаем сообщения пользователя (БЕЗ ЛИМИТА)
+                    # Получаем сообщения пользователя (С ЛИМИТОМ для производительности)
                     message_count = 0
                     try:
                         async for message in self.client.iter_messages(
                             chat,
-                            from_user=user
+                            from_user=user,
+                            limit=200  # Ограничим количество проверяемых сообщений
                         ):
                             if message:
                                 message_count += 1
                     except:
-                        # Если не удалось получить сообщения, пропускаем
                         continue
                     
                     if message_count > 0:
@@ -1233,7 +1226,6 @@ class TelegramSpyBot:
                 except Exception as e:
                     continue
                 
-                # Небольшая пауза чтобы не спамить
                 await asyncio.sleep(0.1)
             
             # Сортируем по количеству сообщений
@@ -1247,7 +1239,7 @@ class TelegramSpyBot:
                 f"📁 Всего чатов в списке: {len(chats)}\n"
                 f"✅ Проверено чатов: {checked_chats}\n"
                 f"💬 Чатов с сообщениями: {len(chat_stats)}\n"
-                f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
+                f"⏱ Ограничение: 200 сообщений на чат\n\n"
             )
             
             # Добавляем топ чатов
@@ -1293,15 +1285,15 @@ class TelegramSpyBot:
             if user_id in self.monitored_users:
                 stats["total_messages"] = self.monitored_users[user_id].total_messages
             
-            # Получаем список диалогов (без лимита)
-            dialogs = await self.client.get_dialogs()
+            # Получаем список диалогов (с ограничением)
+            dialogs = await self.client.get_dialogs(limit=50)
             common_chats = []
             
             for dialog in dialogs:
                 if dialog.is_group:
                     try:
                         # Для групп проверяем участников
-                        participants = await self.client.get_participants(dialog.entity, limit=100)
+                        participants = await self.client.get_participants(dialog.entity, limit=50)
                         user_ids = [p.id for p in participants if hasattr(p, 'id')]
                         if user_id in user_ids:
                             common_chats.append({
@@ -1388,17 +1380,12 @@ class TelegramSpyBot:
         }
     
     async def search_user_messages(self, chat_id: int, user_id: int, search_text: str):
-        """Ищет сообщения пользователя (без лимитов)"""
+        """Ищет сообщения пользователя (с ограничениями)"""
         try:
             await self.send_bot_message(chat_id, 
                 f"🔎 Начинаю поиск сообщений с текстом: '{search_text}'\n"
                 f"👤 Пользователь ID: <code>{user_id}</code>"
             )
-            
-            # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю поиск... 📊 0%")
-            last_update = time.time()
-            start_time = time.time()
             
             # Получаем пользователя
             try:
@@ -1422,20 +1409,17 @@ class TelegramSpyBot:
             found_messages = []
             checked_chats = 0
             
-            # Ищем в каждом чате
+            # Ищем в каждом чате с ограничением
             for i, chat_identifier in enumerate(chats, 1):
                 try:
-                    # Обновляем прогресс
-                    current_time = time.time()
-                    if current_time - last_update > 5 or i % 5 == 0:
+                    # Отправляем прогресс каждые 5 чатов
+                    if i % 5 == 0:
                         progress = (i / len(chats)) * 100
                         emoji_progress = self.get_progress_emoji(progress)
                         await self.send_bot_message(chat_id, 
                             f"🔎 Ищу сообщения... {emoji_progress} {progress:.1f}%\n"
                             f"📁 Обработано: {i}/{len(chats)} чатов\n"
-                            f"💬 Найдено сообщений: {len(found_messages)}\n"
-                            f"✅ Чатов проверено: {checked_chats}")
-                        last_update = current_time
+                            f"💬 Найдено сообщений: {len(found_messages)}")
                     
                     # Получаем чат
                     chat = await self.get_chat_by_identifier(chat_identifier)
@@ -1444,10 +1428,11 @@ class TelegramSpyBot:
                     
                     checked_chats += 1
                     
-                    # Ищем сообщения (БЕЗ ЛИМИТА!)
+                    # Ищем сообщения (С ЛИМИТОМ для производительности)
                     async for message in self.client.iter_messages(
                         chat,
-                        from_user=user
+                        from_user=user,
+                        limit=100  # Ограничиваем количество сообщений
                     ):
                         if message and message.text and search_text.lower() in message.text.lower():
                             # Формируем ссылку
@@ -1466,8 +1451,8 @@ class TelegramSpyBot:
                                 "message_id": message.id
                             })
                             
-                            # Отправляем сразу если нашли (первые 5 сразу)
-                            if len(found_messages) <= 5:
+                            # Отправляем сразу если нашли (первые 3 сразу)
+                            if len(found_messages) <= 3:
                                 msg_text = (
                                     f"💬 <b>Найдено сообщение:</b>\n\n"
                                     f"📌 Чат: {found_messages[-1]['chat']}\n"
@@ -1480,7 +1465,6 @@ class TelegramSpyBot:
                 except Exception as e:
                     continue
                 
-                # Небольшая пауза
                 await asyncio.sleep(0.05)
             
             # Итоговый отчет
@@ -1492,13 +1476,13 @@ class TelegramSpyBot:
                     f"📊 Найдено сообщений: {len(found_messages):,}\n"
                     f"📁 Всего чатов в списке: {len(chats)}\n"
                     f"✅ Проверено чатов: {checked_chats}\n"
-                    f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
+                    f"⏱ Ограничение: 100 сообщений на чат\n\n"
                     f"<i>Первые результаты отправлены выше ↑</i>"
                 )
                 
-                # Если нашли больше 5, отправляем еще результаты
-                if len(found_messages) > 5:
-                    remaining = found_messages[5:min(15, len(found_messages))]
+                # Если нашли больше 3, отправляем еще результаты
+                if len(found_messages) > 3:
+                    remaining = found_messages[3:min(10, len(found_messages))]
                     for msg in remaining:
                         msg_text = (
                             f"💬 <b>Еще найдено:</b>\n\n"
@@ -1509,9 +1493,9 @@ class TelegramSpyBot:
                         )
                         await self.send_bot_message(chat_id, msg_text)
                     
-                    if len(found_messages) > 15:
+                    if len(found_messages) > 10:
                         await self.send_bot_message(chat_id,
-                            f"📄 <b>И еще {len(found_messages) - 15:,} сообщений...</b>\n"
+                            f"📄 <b>И еще {len(found_messages) - 10:,} сообщений...</b>\n"
                             f"Всего найдено: {len(found_messages):,}"
                         )
             else:
@@ -1521,7 +1505,7 @@ class TelegramSpyBot:
                     f"🔍 Текст: '{search_text}'\n"
                     f"📁 Всего чатов в списке: {len(chats)}\n"
                     f"✅ Проверено чатов: {checked_chats}\n"
-                    f"⏱ Время выполнения: {time.time() - start_time:.1f} сек"
+                    f"⏱ Ограничение: 100 сообщений на чат"
                 )
             
             keyboard = self.create_keyboard([
@@ -1616,17 +1600,18 @@ class TelegramSpyBot:
             
             while self.tracking_status.get(user_id, {}).get('messages', False):
                 try:
-                    # Получаем список диалогов
-                    dialogs = await self.client.get_dialogs(limit=30)
+                    # Получаем список диалогов с ограничением
+                    dialogs = await self.client.get_dialogs(limit=20)
                     
                     new_messages_found = False
                     
                     for dialog in dialogs:
                         if dialog.is_group or dialog.is_channel:
                             try:
-                                # Получаем последние сообщения (без лимита для новых)
+                                # Получаем последние сообщения с ограничением
                                 messages = await self.client.get_messages(
                                     dialog.entity,
+                                    limit=20,
                                     offset_date=last_check
                                 )
                                 
@@ -1890,8 +1875,9 @@ class TelegramSpyBot:
             
             while self.tracking_status.get(user_id, {}).get('replies', False):
                 try:
-                    # Получаем список чатов из файла (все чаты)
+                    # Получаем список чатов из файла с ограничением
                     chat_identifiers = await self.load_chats_list()
+                    chat_identifiers = chat_identifiers[:10]  # Ограничиваем количество чатов
                     
                     if not chat_identifiers:
                         print(f"⚠️ Нет чатов для мониторинга ответов у {user_id}")
@@ -1904,17 +1890,18 @@ class TelegramSpyBot:
                     
                     new_replies_found = False
                     
-                    # Проверяем каждый чат
+                    # Проверяем каждый чат с ограничением
                     for chat_identifier in chat_identifiers:
                         try:
                             chat = await self.get_chat_by_identifier(chat_identifier)
                             if not chat:
                                 continue
                             
-                            # Получаем последние сообщения пользователя в этом чате (без лимита)
+                            # Получаем последние сообщения пользователя в этом чате с ограничением
                             messages = await self.client.get_messages(
                                 chat,
                                 from_user=user,
+                                limit=10,  # Ограничиваем количество сообщений
                                 offset_date=last_check
                             )
                             
@@ -1933,12 +1920,13 @@ class TelegramSpyBot:
                                     # Ждем немного чтобы могли появиться ответы
                                     await asyncio.sleep(2)
                                     
-                                    # Проверяем есть ли ответы на это сообщение
+                                    # Проверяем есть ли ответы на это сообщение с ограничением
                                     try:
-                                        # Получаем историю вокруг сообщения (без лимита)
+                                        # Получаем историю вокруг сообщения с ограничением
                                         replies = await self.client.get_messages(
                                             chat,
-                                            min_id=message.id
+                                            min_id=message.id,
+                                            limit=20  # Ограничиваем количество проверяемых ответов
                                         )
                                         
                                         for reply in replies:
@@ -1984,7 +1972,6 @@ class TelegramSpyBot:
                         except Exception as e:
                             continue
                         
-                        # Небольшая пауза между чатами
                         await asyncio.sleep(0.5)
                     
                     if new_replies_found:
@@ -2074,17 +2061,12 @@ class TelegramSpyBot:
         }
     
     async def search_replies_to_user(self, chat_id: int, user_id: int, target_user_input: str):
-        """Ищет ответы от конкретного пользователя нашему пользователю (без лимитов)"""
+        """Ищет ответы от конкретного пользователя нашему пользователю (с ограничениями)"""
         try:
             await self.send_bot_message(chat_id, 
                 f"🔍 Начинаю поиск ответов от пользователя '{target_user_input}' нашему пользователю...\n"
                 f"👤 Наш пользователь ID: <code>{user_id}</code>"
             )
-            
-            # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "🔍 Начинаю поиск... 📊 0%")
-            last_update = time.time()
-            start_time = time.time()
             
             # Получаем нашего пользователя
             try:
@@ -2141,22 +2123,18 @@ class TelegramSpyBot:
             
             found_replies = []
             checked_chats = 0
-            start_date = datetime(1970, 1, 1)  # С самого начала времени
             
-            # Ищем в каждом чате
+            # Ищем в каждом чате с ограничением
             for i, chat_identifier in enumerate(chats, 1):
                 try:
-                    # Обновляем прогресс
-                    current_time = time.time()
-                    if current_time - last_update > 5 or i % 5 == 0:
+                    # Отправляем прогресс каждые 5 чатов
+                    if i % 5 == 0:
                         progress = (i / len(chats)) * 100
                         emoji_progress = self.get_progress_emoji(progress)
                         await self.send_bot_message(chat_id, 
                             f"🔍 Ищу ответы... {emoji_progress} {progress:.1f}%\n"
                             f"📁 Обработано: {i}/{len(chats)} чатов\n"
-                            f"💬 Найдено ответов: {len(found_replies)}\n"
-                            f"✅ Чатов проверено: {checked_chats}")
-                        last_update = current_time
+                            f"💬 Найдено ответов: {len(found_replies)}")
                     
                     # Получаем чат
                     chat = await self.get_chat_by_identifier(chat_identifier)
@@ -2165,22 +2143,24 @@ class TelegramSpyBot:
                     
                     checked_chats += 1
                     
-                    # Получаем сообщения нашего пользователя (БЕЗ ЛИМИТА по времени)
+                    # Получаем сообщения нашего пользователя (С ЛИМИТОМ для производительности)
                     user_messages = []
                     async for message in self.client.iter_messages(
                         chat,
-                        from_user=user
+                        from_user=user,
+                        limit=50  # Ограничиваем количество сообщений
                     ):
                         if message:
                             user_messages.append(message)
                     
-                    # Проверяем ответы на каждое сообщение
+                    # Проверяем ответы на каждое сообщение с ограничением
                     for user_msg in user_messages:
                         try:
-                            # Получаем ответы на это сообщение (БЕЗ ЛИМИТА)
+                            # Получаем ответы на это сообщение (С ЛИМИТОМ)
                             async for reply in self.client.iter_messages(
                                 chat,
-                                min_id=user_msg.id - 1
+                                min_id=user_msg.id - 1,
+                                limit=20  # Ограничиваем количество проверяемых ответов
                             ):
                                 if (reply and reply.reply_to and 
                                     reply.reply_to.reply_to_msg_id == user_msg.id and
@@ -2242,7 +2222,6 @@ class TelegramSpyBot:
                 except Exception as e:
                     continue
                 
-                # Пауза между чатами
                 await asyncio.sleep(0.05)
             
             # Итоговый отчет
@@ -2262,8 +2241,7 @@ class TelegramSpyBot:
                     f"📊 Найдено ответов: {len(found_replies):,}\n"
                     f"📁 Всего чатов в списке: {len(chats)}\n"
                     f"✅ Проверено чатов: {checked_chats}\n"
-                    f"⏳ Период: все время\n"
-                    f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
+                    f"⏱ Ограничение: 50 сообщений на чат, 20 ответов на сообщение\n\n"
                     f"<i>Первые результаты отправлены выше ↑</i>"
                 )
                 
@@ -2300,8 +2278,7 @@ class TelegramSpyBot:
                     f"🆔 ID целевого: <code>{target_user.id}</code>\n"
                     f"📁 Всего чатов в списке: {len(chats)}\n"
                     f"✅ Проверено чатов: {checked_chats}\n"
-                    f"⏳ Период: все время\n"
-                    f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
+                    f"⏱ Ограничение: 50 сообщений на чат, 20 ответов на сообщение\n\n"
                     f"<i>Пользователь {target_name} не отвечал на сообщения нашего пользователя</i>"
                 )
             
@@ -2322,17 +2299,12 @@ class TelegramSpyBot:
             await self.send_bot_message(chat_id, f"❌ Ошибка поиска: {str(e)[:100]}")
     
     async def search_replies_from_user(self, chat_id: int, user_id: int, target_user_input: str):
-        """Ищет ответы нашего пользователя конкретному пользователю (без лимитов)"""
+        """Ищет ответы нашего пользователя конкретному пользователю (с ограничениями)"""
         try:
             await self.send_bot_message(chat_id, 
                 f"🔍 Начинаю поиск ответов нашего пользователя пользователю '{target_user_input}'...\n"
                 f"👤 Наш пользователь ID: <code>{user_id}</code>"
             )
-            
-            # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "🔍 Начинаю поиск... 📊 0%")
-            last_update = time.time()
-            start_time = time.time()
             
             # Получаем нашего пользователя
             try:
@@ -2389,22 +2361,18 @@ class TelegramSpyBot:
             
             found_replies = []
             checked_chats = 0
-            start_date = datetime(1970, 1, 1)  # С самого начала времени
             
-            # Ищем в каждом чате
+            # Ищем в каждом чате с ограничением
             for i, chat_identifier in enumerate(chats, 1):
                 try:
-                    # Обновляем прогресс
-                    current_time = time.time()
-                    if current_time - last_update > 5 or i % 5 == 0:
+                    # Отправляем прогресс каждые 5 чатов
+                    if i % 5 == 0:
                         progress = (i / len(chats)) * 100
                         emoji_progress = self.get_progress_emoji(progress)
                         await self.send_bot_message(chat_id, 
                             f"🔍 Ищу ответы... {emoji_progress} {progress:.1f}%\n"
                             f"📁 Обработано: {i}/{len(chats)} чатов\n"
-                            f"💬 Найдено ответов: {len(found_replies)}\n"
-                            f"✅ Чатов проверено: {checked_chats}")
-                        last_update = current_time
+                            f"💬 Найдено ответов: {len(found_replies)}")
                     
                     # Получаем чат
                     chat = await self.get_chat_by_identifier(chat_identifier)
@@ -2413,10 +2381,11 @@ class TelegramSpyBot:
                     
                     checked_chats += 1
                     
-                    # Получаем сообщения нашего пользователя (БЕЗ ЛИМИТА по времени)
+                    # Получаем сообщения нашего пользователя (С ЛИМИТОМ для производительности)
                     async for message in self.client.iter_messages(
                         chat,
-                        from_user=user
+                        from_user=user,
+                        limit=50  # Ограничиваем количество сообщений
                     ):
                         if message and message.reply_to:
                             try:
@@ -2480,7 +2449,6 @@ class TelegramSpyBot:
                 except Exception as e:
                     continue
                 
-                # Пауза между чатами
                 await asyncio.sleep(0.05)
             
             # Итоговый отчет
@@ -2500,8 +2468,7 @@ class TelegramSpyBot:
                     f"📊 Найдено ответов: {len(found_replies):,}\n"
                     f"📁 Всего чатов в списке: {len(chats)}\n"
                     f"✅ Проверено чатов: {checked_chats}\n"
-                    f"⏳ Период: все время\n"
-                    f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
+                    f"⏱ Ограничение: 50 сообщений на чат\n\n"
                     f"<i>Первые результаты отправлены выше ↑</i>"
                 )
                 
@@ -2538,8 +2505,7 @@ class TelegramSpyBot:
                     f"🆔 ID целевого: <code>{target_user.id}</code>\n"
                     f"📁 Всего чатов в списке: {len(chats)}\n"
                     f"✅ Проверено чатов: {checked_chats}\n"
-                    f"⏳ Период: все время\n"
-                    f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
+                    f"⏱ Ограничение: 50 сообщений на чат\n\n"
                     f"<i>Наш пользователь не отвечал на сообщения пользователя {target_name}</i>"
                 )
             
@@ -2560,7 +2526,7 @@ class TelegramSpyBot:
             await self.send_bot_message(chat_id, f"❌ Ошибка поиска: {str(e)[:100]}")
     
     async def collect_replies_data(self, user_id: int):
-        """Собирает данные о реплаях пользователя (без лимитов)"""
+        """Собирает данные о реплаях пользователя (с ограничениями для производительности)"""
         try:
             user = await self.client.get_entity(PeerUser(user_id))
             
@@ -2573,7 +2539,8 @@ class TelegramSpyBot:
             replies_to_user = []  # Кто отвечает пользователю
             replies_from_user = []  # Кому отвечает пользователь
             
-            start_date = datetime(1970, 1, 1)  # С самого начала времени
+            # Ограничиваем количество чатов для производительности
+            chat_identifiers = chat_identifiers[:15]
             
             for i, chat_identifier in enumerate(chat_identifiers, 1):
                 try:
@@ -2582,11 +2549,12 @@ class TelegramSpyBot:
                     if not chat:
                         continue
                     
-                    # Получаем сообщения пользователя (БЕЗ ЛИМИТА)
+                    # Получаем сообщения пользователя (С ЛИМИТОМ для производительности)
                     user_messages = []
                     async for message in self.client.iter_messages(
                         chat,
-                        from_user=user
+                        from_user=user,
+                        limit=100  # Ограничиваем количество сообщений
                     ):
                         if message:
                             user_messages.append(message)
@@ -2594,10 +2562,11 @@ class TelegramSpyBot:
                     # Проверяем кто отвечает на сообщения пользователя
                     for user_msg in user_messages:
                         try:
-                            # Получаем ответы на это сообщение (БЕЗ ЛИМИТА)
+                            # Получаем ответы на это сообщение (С ЛИМИТОМ)
                             async for reply in self.client.iter_messages(
                                 chat,
-                                min_id=user_msg.id - 1
+                                min_id=user_msg.id - 1,
+                                limit=20  # Ограничиваем количество проверяемых ответов
                             ):
                                 if (reply and reply.reply_to and 
                                     reply.reply_to.reply_to_msg_id == user_msg.id and
@@ -2639,7 +2608,8 @@ class TelegramSpyBot:
                     # Проверяем кому отвечает пользователь
                     async for message in self.client.iter_messages(
                         chat,
-                        from_user=user
+                        from_user=user,
+                        limit=100  # Ограничиваем количество сообщений
                     ):
                         if message and message.reply_to:
                             try:
@@ -2683,10 +2653,11 @@ class TelegramSpyBot:
                                 continue
                 
                 except Exception as e:
+                    print(f"Ошибка обработки чата {chat_identifier}: {e}")
                     continue
                 
                 # Пауза между чатами
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.1)
             
             # Сохраняем в кэш
             self.reply_data_cache[user_id] = {
@@ -2703,9 +2674,9 @@ class TelegramSpyBot:
     async def show_replies_to_user(self, chat_id: int, user_id: int, page: int = 0):
         """Показывает кто отвечает пользователю"""
         try:
-            await self.send_bot_message(chat_id, "🔍 Собираю данные о том, кто отвечает пользователю...")
+            await self.send_bot_message(chat_id, "🔍 Собираю данные о том, кто отвечает пользователю... Это может занять некоторое время.")
             
-            # Получаем данные о реплаях (без лимитов)
+            # Получаем данные о реплаях (с ограничениями для производительности)
             reply_data = await self.collect_replies_data(user_id)
             replies_to_user = reply_data["to_user"]
             
@@ -2713,8 +2684,8 @@ class TelegramSpyBot:
                 await self.send_bot_message(chat_id,
                     f"❌ <b>Ответов не найдено</b>\n\n"
                     f"👤 Пользователь: <code>{user_id}</code>\n"
-                    f"⏳ Период: все время\n\n"
-                    "Никто не отвечал на сообщения пользователя."
+                    f"⏳ Проверено: последние сообщения\n\n"
+                    "Никто не отвечал на сообщения пользователя в проверенных чатах."
                 )
                 return
             
@@ -2750,7 +2721,7 @@ class TelegramSpyBot:
                 f"👤 Пользователь: <code>{user_id}</code>\n"
                 f"📊 Всего отвечавших: {len(sorted_users)}\n"
                 f"💬 Всего ответов: {len(replies_to_user):,}\n"
-                f"⏳ Период: все время\n\n"
+                f"⏳ Проверено: последние 100 сообщений в каждом чате\n\n"
                 f"<i>Страница {page + 1} из {total_pages}</i>\n\n"
             )
             
@@ -2794,9 +2765,9 @@ class TelegramSpyBot:
     async def show_replies_from_user(self, chat_id: int, user_id: int, page: int = 0):
         """Показывает кому отвечает пользователь"""
         try:
-            await self.send_bot_message(chat_id, "🔍 Собираю данные о том, кому отвечает пользователь...")
+            await self.send_bot_message(chat_id, "🔍 Собираю данные о том, кому отвечает пользователь... Это может занять некоторое время.")
             
-            # Получаем данные о реплаях (без лимитов)
+            # Получаем данные о реплаях (с ограничениями для производительности)
             reply_data = await self.collect_replies_data(user_id)
             replies_from_user = reply_data["from_user"]
             
@@ -2804,8 +2775,8 @@ class TelegramSpyBot:
                 await self.send_bot_message(chat_id,
                     f"❌ <b>Ответов не найдено</b>\n\n"
                     f"👤 Пользователь: <code>{user_id}</code>\n"
-                    f"⏳ Период: все время\n\n"
-                    "Пользователь никому не отвечал."
+                    f"⏳ Проверено: последние сообщения\n\n"
+                    "Пользователь никому не отвечал в проверенных чатах."
                 )
                 return
             
@@ -2841,7 +2812,7 @@ class TelegramSpyBot:
                 f"👤 Пользователь: <code>{user_id}</code>\n"
                 f"📊 Всего собеседников: {len(sorted_users)}\n"
                 f"💬 Всего ответов: {len(replies_from_user):,}\n"
-                f"⏳ Период: все время\n\n"
+                f"⏳ Проверено: последние 100 сообщений в каждом чате\n\n"
                 f"<i>Страница {page + 1} из {total_pages}</i>\n\n"
             )
             
@@ -2885,7 +2856,7 @@ class TelegramSpyBot:
     async def show_reply_pair_details(self, chat_id: int, user_id: int, index: int, direction: str):
         """Показывает детали реплаев с конкретным пользователем"""
         try:
-            # Получаем данные о реплаях (без лимитов)
+            # Получаем данные о реплаях (с ограничениями)
             reply_data = await self.collect_replies_data(user_id)
             
             if direction == "to":
@@ -2948,7 +2919,7 @@ class TelegramSpyBot:
     async def show_reply_pair_page(self, chat_id: int, user_id: int, user_index: int, direction: str, page: int):
         """Показывает страницу с реплаями для конкретного пользователя"""
         try:
-            # Получаем данные о реплаях (без лимитов)
+            # Получаем данные о реплаях (с ограничениями)
             reply_data = await self.collect_replies_data(user_id)
             
             if direction == "to":
@@ -3418,10 +3389,10 @@ class TelegramSpyBot:
         print("🤖 TELEGRAM SPY BOT v3.4")
         print("="*60)
         print("✨ Улучшенная версия:")
-        print("• Убраны все лимиты на поиск сообщений")
-        print("• Улучшен прогресс с эмодзи")
-        print("• Поддержка ссылок типа https://t.me/+...")
-        print("• Чаты не загружаются автоматически")
+        print("• Добавлены ограничения для производительности")
+        print("• Исправлено зависание при поиске реплаев")
+        print("• Улучшена обработка ошибок")
+        print("• Убраны блокирующие вызовы в циклах")
         print("="*60)
         
         # Подключаемся к Telegram
@@ -3437,12 +3408,12 @@ class TelegramSpyBot:
             f"👤 Аккаунт: {self.current_user.first_name if self.current_user else 'Неизвестно'}\n"
             f"🆔 ID: {self.current_user.id if self.current_user else 'Неизвестно'}\n"
             f"🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            f"✨ <b>Улучшенная версия:</b>\n"
-            f"• 📊 Улучшенный прогресс с эмодзи\n"
-            f"• 🔍 Поиск без лимитов по времени\n"
-            f"• 📁 Все чаты из файла chats.txt\n"
-            f"• 🔗 Поддержка приватных ссылок\n"
-            f"• ⚡ Чаты загружаются только по запросу\n\n"
+            f"✨ <b>Исправленная версия:</b>\n"
+            f"• 🚀 Исправлено зависание при поиске реплаев\n"
+            f"• ⚡ Добавлены ограничения для производительности\n"
+            f"• 🛡️ Улучшена обработка ошибок\n"
+            f"• 📊 Улучшен прогресс с эмодзи\n"
+            f"• 🔗 Поддержка приватных ссылок\n\n"
             f"📝 Отправьте /start для начала работы"
         )
         
@@ -3518,4 +3489,3 @@ if __name__ == "__main__":
         print(f"\n❌ Фатальная ошибка: {e}")
         import traceback
         traceback.print_exc()
-[file content end]
