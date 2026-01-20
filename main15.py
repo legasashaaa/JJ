@@ -650,7 +650,7 @@ class TelegramSpyBot:
                 await self.send_bot_message(chat_id, f"❌ Ошибка: {error_msg[:100]}")
     
     async def load_user_chats(self, chat_id: int, user_id: int):
-        """Быстро загружает чаты пользователя (по запросу)"""
+        """Быстро загружает чаты пользователя (по запросу) и показывает их"""
         try:
             if user_id not in self.monitored_users:
                 await self.send_bot_message(chat_id, "❌ Пользователь не найден")
@@ -660,13 +660,13 @@ class TelegramSpyBot:
             
             # Если уже загружены, просто показываем
             if profile.user_chats_loaded and profile.user_chats:
-                await self.show_user_chats(chat_id, user_id, 0)
+                await self.show_user_chats(chat_id, user_id, 0)  # Показываем первую страницу
                 return
             
-            start_time = time.time()
             # Отправляем красивое уведомление о прогрессе
-            await self.send_bot_message(chat_id, "🔍 Сканирую диалоги... 📊 0%")
+            progress_msg = await self.send_bot_message(chat_id, "🔍 Сканирую диалоги... 📊 0%")
             last_update = time.time()
+            start_time = time.time()
             
             user = await self.client.get_entity(PeerUser(user_id))
             user_chats = []
@@ -760,13 +760,14 @@ class TelegramSpyBot:
                 f"⏱ Время выполнения: {time.time() - start_time:.1f} сек"
             )
             
-            # ПОСЛЕ ЗАВЕРШЕНИЯ СРАЗУ ПОКАЗЫВАЕМ ЧАТЫ
-            await self.show_user_chats(chat_id, user_id, 0)
+            # Показываем загруженные чаты с пагинацией
+            if user_chats:
+                await self.show_user_chats(chat_id, user_id, 0)
+            else:
+                await self.send_bot_message(chat_id, "📭 У пользователя не найдено чатов")
             
         except Exception as e:
             print(f"Ошибка загрузки чатов: {e}")
-            # Показываем меню, но без чатов
-            await self.show_user_actions(chat_id, user_id)
             await self.send_bot_message(chat_id, f"❌ Ошибка загрузки чатов: {str(e)[:100]}")
     
     def get_progress_emoji(self, percentage: float) -> str:
@@ -892,12 +893,10 @@ class TelegramSpyBot:
             
             if not profile.user_chats:
                 await self.send_bot_message(chat_id, "📭 У пользователя не найдено чатов")
-                # Показываем меню
-                await self.show_user_actions(chat_id, user_id)
                 return
             
             # Разбиваем на страницы
-            items_per_page = 8
+            items_per_page = 10
             total_pages = (len(profile.user_chats) + items_per_page - 1) // items_per_page
             
             if page >= total_pages:
@@ -920,9 +919,9 @@ class TelegramSpyBot:
             
             # Добавляем чаты текущей страницы
             for i, chat in enumerate(sorted_chats[start_idx:end_idx], start_idx + 1):
-                chat_name = chat['name'][:50] if len(chat['name']) > 50 else chat['name']
-                message_count = chat['message_count']
-                message_text += f"<b>{i}.</b> <a href='{chat['link']}'>{chat_name}</a> - {message_count:,} сообщ.\n"
+                # Форматируем количество сообщений с разделителями тысяч
+                message_count = f"{chat['message_count']:,}"
+                message_text += f"{i}. <a href='{chat['link']}'>{chat['name']}</a> - {message_count} сообщ.\n"
             
             # Создаем клавиатуру с пагинацией
             keyboard_buttons = []
@@ -1158,7 +1157,7 @@ class TelegramSpyBot:
         """Показывает количество сообщений пользователя во всех чатах"""
         try:
             # Создаем прогресс сообщение
-            await self.send_bot_message(chat_id, "📊 Начинаю подсчёт сообщений... 📊 0%")
+            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю подсчёт сообщений... 📊 0%")
             last_update = time.time()
             start_time = time.time()
             
@@ -1397,7 +1396,7 @@ class TelegramSpyBot:
             )
             
             # Создаем прогресс сообщение
-            await self.send_bot_message(chat_id, "📊 Начинаю поиск... 📊 0%")
+            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю поиск... 📊 0%")
             last_update = time.time()
             start_time = time.time()
             
@@ -1923,7 +1922,7 @@ class TelegramSpyBot:
                                 if not message or message.date <= last_check:
                                     continue
                                 
-                                # Получаем последний известный ID сообщения для этого чат
+                                # Получаем последний известный ID сообщения для этого чата
                                 last_msg_id = self.last_message_ids[user_id].get(chat.id, 0)
                                 
                                 # Если это новое сообщение
@@ -2083,7 +2082,7 @@ class TelegramSpyBot:
             )
             
             # Создаем прогресс сообщение
-            await self.send_bot_message(chat_id, "🔍 Начинаю поиск... 📊 0%")
+            progress_msg = await self.send_bot_message(chat_id, "🔍 Начинаю поиск... 📊 0%")
             last_update = time.time()
             start_time = time.time()
             
@@ -2331,7 +2330,7 @@ class TelegramSpyBot:
             )
             
             # Создаем прогресс сообщение
-            await self.send_bot_message(chat_id, "🔍 Начинаю поиск... 📊 0%")
+            progress_msg = await self.send_bot_message(chat_id, "🔍 Начинаю поиск... 📊 0%")
             last_update = time.time()
             start_time = time.time()
             
@@ -3036,7 +3035,7 @@ class TelegramSpyBot:
             if page > 0:
                 nav_buttons.append({"text": "⬅️ Назад", "callback_data": f"reply_page:{user_id}:{user_index}:{direction}:{page-1}"})
             
-            nav_buttons.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": f"reply_page:{user_id}:{user_index}:{direction}:{page}"})
+            nav_buttons.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": "noop"})
             
             if page < total_pages - 1:
                 nav_buttons.append({"text": "Вперёд ➡️", "callback_data": f"reply_page:{user_id}:{user_index}:{direction}:{page+1}"})
