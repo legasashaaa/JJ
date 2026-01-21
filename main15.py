@@ -305,6 +305,7 @@ class TelegramSpyBot:
                     "3. Выберите действие из меню\n\n"
                     "👁 <b>Отслеживание:</b>\n"
                     "• Сообщения - уведомления о новых сообщениях\n"
+                    "• Аватарки - фото при смене аватарки\n"
                     "• Ответы - кто отвечает на сообщения пользователя\n"
                     "• Друзья - анализ социальных связей"
                 )
@@ -410,6 +411,10 @@ class TelegramSpyBot:
                 user_id = int(parts[1])
                 await self.toggle_message_monitoring(chat_id, user_id)
             
+            elif action == "monitor_avatar":
+                user_id = int(parts[1])
+                await self.toggle_avatar_monitoring(chat_id, user_id)
+            
             elif action == "monitor_replies":
                 user_id = int(parts[1])
                 await self.toggle_reply_monitoring(chat_id, user_id)
@@ -421,6 +426,10 @@ class TelegramSpyBot:
             elif action == "track_friends":
                 user_id = int(parts[1])
                 await self.show_friends_menu(chat_id, user_id)
+            
+            elif action == "get_avatar":
+                user_id = int(parts[1])
+                await self.send_current_avatar(chat_id, user_id)
             
             elif action == "get_message_count":
                 user_id = int(parts[1])
@@ -442,13 +451,17 @@ class TelegramSpyBot:
                     "<code>123456789</code>"
                 )
             
+            elif action == "refresh_status":
+                user_id = int(parts[1])
+                await self.show_user_actions(chat_id, user_id)
+            
             elif action == "show_replies":
                 user_id = int(parts[1])
                 await self.show_replies_menu(chat_id, user_id)
             
             elif action == "all_user_replies":
                 user_id = int(parts[1])
-                await self.show_all_user_replies(chat_id, user_id)
+                await self.search_friends(chat_id, user_id)
             
             elif action == "search_replies_to_specific":
                 user_id = int(parts[1])
@@ -472,6 +485,10 @@ class TelegramSpyBot:
             elif action == "refresh_chats":
                 user_id = int(parts[1])
                 await self.load_user_chats(chat_id, user_id)
+            
+            elif action == "search_friends":
+                user_id = int(parts[1])
+                await self.search_friends(chat_id, user_id)
             
             # Подтверждаем нажатие кнопки
             await self.answer_callback_query(callback_query["id"])
@@ -772,6 +789,7 @@ class TelegramSpyBot:
             
             # Определяем статусы отслеживания
             track_msg_status = "✅" if profile.is_tracking_messages else "🔲"
+            track_avatar_status = "✅" if profile.is_tracking_avatar else "🔲"
             track_reply_status = "✅" if profile.is_tracking_replies else "🔲"
             
             user_info = (
@@ -806,18 +824,23 @@ class TelegramSpyBot:
                 ],
                 [
                     {"text": f"{track_msg_status} Следить за сообщениями", "callback_data": f"monitor_messages:{user_id}"},
-                    {"text": f"{track_reply_status} Следить за ответами", "callback_data": f"monitor_replies:{user_id}"}
+                    {"text": f"{track_avatar_status} Следить за аватаркой", "callback_data": f"monitor_avatar:{user_id}"}
                 ],
                 [
-                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"},
-                    {"text": "👥 Анализ друзей", "callback_data": f"track_friends:{user_id}"}
+                    {"text": f"{track_reply_status} Следить за ответами", "callback_data": f"monitor_replies:{user_id}"},
+                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"}
                 ],
                 [
                     {"text": "📊 Количество сообщений", "callback_data": f"get_message_count:{user_id}"},
+                    {"text": "👥 Друзья", "callback_data": f"track_friends:{user_id}"}
+                ],
+                [
+                    {"text": "📸 Получить аватарку", "callback_data": f"get_avatar:{user_id}"},
                     {"text": "📁 Показать все чаты", "callback_data": f"show_user_chats:{user_id}:0"}
                 ],
                 [
-                    {"text": "📁 Загрузить чаты", "callback_data": f"refresh_chats:{user_id}"}
+                    {"text": "🔄 Обновить", "callback_data": f"refresh_status:{user_id}"},
+                    {"text": "🔄 Обновить чаты", "callback_data": f"refresh_chats:{user_id}"}
                 ]
             ]
             
@@ -891,7 +914,7 @@ class TelegramSpyBot:
             # Кнопки управления
             keyboard_buttons.append([
                 {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"},
-                {"text": "📁 Обновить чаты", "callback_data": f"refresh_chats:{user_id}"}
+                {"text": "🔄 Обновить чаты", "callback_data": f"refresh_chats:{user_id}"}
             ])
             
             keyboard = self.create_keyboard(keyboard_buttons)
@@ -916,6 +939,7 @@ class TelegramSpyBot:
             
             # Определяем статусы отслеживания
             track_msg_status = "✅" if profile.is_tracking_messages else "🔲"
+            track_avatar_status = "✅" if profile.is_tracking_avatar else "🔲"
             track_reply_status = "✅" if profile.is_tracking_replies else "🔲"
             
             user_info = (
@@ -937,14 +961,19 @@ class TelegramSpyBot:
                 ],
                 [
                     {"text": f"{track_msg_status} Следить за сообщениями", "callback_data": f"monitor_messages:{user_id}"},
-                    {"text": f"{track_reply_status} Следить за ответами", "callback_data": f"monitor_replies:{user_id}"}
+                    {"text": f"{track_avatar_status} Следить за аватаркой", "callback_data": f"monitor_avatar:{user_id}"}
                 ],
                 [
-                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"},
-                    {"text": "👥 Анализ друзей", "callback_data": f"track_friends:{user_id}"}
+                    {"text": f"{track_reply_status} Следить за ответами", "callback_data": f"monitor_replies:{user_id}"},
+                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"}
                 ],
                 [
-                    {"text": "📊 Количество сообщений", "callback_data": f"get_message_count:{user_id}"}
+                    {"text": "📊 Количество сообщений", "callback_data": f"get_message_count:{user_id}"},
+                    {"text": "👥 Друзья", "callback_data": f"track_friends:{user_id}"}
+                ],
+                [
+                    {"text": "📸 Получить аватарку", "callback_data": f"get_avatar:{user_id}"},
+                    {"text": "🔄 Обновить", "callback_data": f"refresh_status:{user_id}"}
                 ],
                 [
                     {"text": "📁 Загрузить чаты пользователя", "callback_data": f"refresh_chats:{user_id}"}
@@ -993,6 +1022,24 @@ class TelegramSpyBot:
         except Exception as e:
             print(f"Ошибка получения аватарки: {e}")
             return None
+    
+    async def send_current_avatar(self, chat_id: int, user_id: int):
+        """Отправляет текущую аватарку пользователя"""
+        try:
+            await self.send_bot_message(chat_id, "📸 Загружаю аватарку...")
+            
+            avatar_bytes = await self.get_user_avatar_bytes(user_id)
+            
+            if avatar_bytes:
+                # Отправляем фото
+                caption = f"🖼 <b>Аватарка пользователя</b>\n🆔 ID: <code>{user_id}</code>\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+                await self.send_bot_message(chat_id, caption, photo=avatar_bytes)
+            else:
+                await self.send_bot_message(chat_id, "❌ У пользователя нет аватарки или не удалось загрузить")
+                
+        except Exception as e:
+            print(f"Ошибка отправки аватарки: {e}")
+            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
     
     async def get_user_last_seen(self, user) -> Optional[datetime]:
         """Получает время последнего посещения"""
@@ -1047,6 +1094,7 @@ class TelegramSpyBot:
             # Добавляем статус отслеживания
             info_text += f"👁 <b>Отслеживание:</b>\n"
             info_text += f"• Сообщения: {'✅ ВКЛ' if profile.is_tracking_messages else '❌ ВЫКЛ'}\n"
+            info_text += f"• Аватарка: {'✅ ВКЛ' if profile.is_tracking_avatar else '❌ ВЫКЛ'}\n"
             info_text += f"• Ответы: {'✅ ВКЛ' if profile.is_tracking_replies else '❌ ВЫКЛ'}\n\n"
             
             if stats['common_chats_list']:
@@ -1060,7 +1108,8 @@ class TelegramSpyBot:
             
             keyboard = self.create_keyboard([
                 [
-                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"}
+                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"},
+                    {"text": "🔄 Обновить", "callback_data": f"user_info:{user_id}"}
                 ]
             ])
             
@@ -1570,6 +1619,137 @@ class TelegramSpyBot:
         except Exception as e:
             print(f"Мониторинг сообщений остановлен для {user_id}: {e}")
     
+    async def toggle_avatar_monitoring(self, chat_id: int, user_id: int):
+        """Включает/выключает отслеживание аватарки"""
+        try:
+            user = await self.client.get_entity(PeerUser(user_id))
+            
+            # Проверяем текущее состояние
+            if user_id not in self.tracking_status:
+                self.tracking_status[user_id] = {'messages': False, 'avatar': False, 'replies': False}
+            
+            current_state = self.tracking_status[user_id]['avatar']
+            
+            if current_state:
+                # Выключаем отслеживание
+                await self.stop_avatar_monitoring(user_id)
+                self.tracking_status[user_id]['avatar'] = False
+                
+                if user_id in self.monitored_users:
+                    self.monitored_users[user_id].is_tracking_avatar = False
+                
+                await self.send_bot_message(chat_id,
+                    f"🛑 <b>Отслеживание аватарки остановлено</b>\n\n"
+                    f"👤 Пользователь: {user.first_name}\n"
+                    f"🆔 ID: <code>{user_id}</code>\n\n"
+                    f"❌ Вы больше не будете получать уведомления о смене аватарки."
+                )
+            else:
+                # Включаем отслеживание
+                # Получаем текущую аватарку
+                current_avatar = await self.get_user_avatar_bytes(user_id)
+                current_hash = hashlib.md5(current_avatar).hexdigest() if current_avatar else "no_avatar"
+                self.avatar_cache[user_id] = current_hash
+                
+                # Запускаем задачу мониторинга
+                task = asyncio.create_task(
+                    self.monitor_user_avatar(chat_id, user_id),
+                    name=f"avatar_monitor_{user_id}"
+                )
+                self.tracking_tasks.append(task)
+                
+                self.tracking_status[user_id]['avatar'] = True
+                
+                if user_id in self.monitored_users:
+                    self.monitored_users[user_id].is_tracking_avatar = True
+                
+                await self.send_bot_message(chat_id,
+                    f"🖼 <b>Отслеживание аватарки включено</b>\n\n"
+                    f"👤 Пользователь: {user.first_name}\n"
+                    f"🆔 ID: <code>{user_id}</code>\n"
+                    f"📱 Username: @{user.username if user.username else 'нет'}\n\n"
+                    f"📸 Теперь вы будете получать новую аватарку при ее смене.\n"
+                    f"🔔 Проверка каждые 30 минут."
+                )
+                
+                # Отправляем текущую аватарку если есть
+                if current_avatar:
+                    caption = f"📸 <b>Текущая аватарка</b>\n👤 {user.first_name}\n🆔 <code>{user_id}</code>"
+                    await self.send_bot_message(chat_id, caption, photo=current_avatar)
+            
+            # Сохраняем изменения
+            self.save_monitored_users()
+            
+            # Показываем обновленное меню
+            await self.show_user_actions(chat_id, user_id)
+            
+        except Exception as e:
+            print(f"Ошибка переключения отслеживания аватарки: {e}")
+            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+    
+    async def stop_avatar_monitoring(self, user_id: int):
+        """Останавливает отслеживание аватарки"""
+        # Ищем и останавливаем задачу
+        for task in self.tracking_tasks:
+            if not task.done() and task.get_name() == f"avatar_monitor_{user_id}":
+                task.cancel()
+                print(f"🛑 Остановлено отслеживание аватарки для {user_id}")
+                break
+        
+        # Удаляем из кэша
+        if user_id in self.avatar_cache:
+            del self.avatar_cache[user_id]
+    
+    async def monitor_user_avatar(self, chat_id: int, user_id: int):
+        """Мониторит аватарку пользователя"""
+        print(f"🚀 Запущен мониторинг аватарки для пользователя {user_id}")
+        
+        try:
+            user = await self.client.get_entity(PeerUser(user_id))
+            
+            while self.tracking_status.get(user_id, {}).get('avatar', False):
+                try:
+                    # Получаем текущую аватарку
+                    current_avatar = await self.get_user_avatar_bytes(user_id)
+                    current_hash = hashlib.md5(current_avatar).hexdigest() if current_avatar else "no_avatar"
+                    old_hash = self.avatar_cache.get(user_id, "")
+                    
+                    if current_hash != old_hash:
+                        print(f"🔄 Обнаружена смена аватарки у {user_id}")
+                        
+                        # Обновляем кэш
+                        self.avatar_cache[user_id] = current_hash
+                        
+                        if current_avatar:
+                            # Отправляем новую аватарку
+                            caption = (
+                                f"🔄 <b>СМЕНА АВАТАРКИ!</b>\n\n"
+                                f"👤 Пользователь: {user.first_name}\n"
+                                f"🆔 ID: <code>{user_id}</code>\n"
+                                f"📱 Username: @{user.username if user.username else 'нет'}\n"
+                                f"📅 Время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+                            )
+                            
+                            await self.send_bot_message(chat_id, caption, photo=current_avatar)
+                        else:
+                            # Аватарка удалена
+                            await self.send_bot_message(chat_id,
+                                f"🗑 <b>АВАТАРКА УДАЛЕНА</b>\n\n"
+                                f"👤 Пользователь: {user.first_name}\n"
+                                f"🆔 ID: <code>{user_id}</code>\n"
+                                f"📅 Время: {datetime.now().strftime('%H:%M:%S')}"
+                            )
+                    
+                    # Ждем перед следующей проверкой
+                    await asyncio.sleep(1800)  # 30 минут
+                    
+                except Exception as e:
+                    print(f"Ошибка в цикле мониторинга аватарки: {e}")
+                    await asyncio.sleep(600)  # 10 минут при ошибке
+                    
+        except Exception as e:
+            print(f"Мониторинг аватарки остановлен для {user_id}: {e}")
+    
     async def toggle_reply_monitoring(self, chat_id: int, user_id: int):
         """Включает/выключает отслеживание ответов на сообщения"""
         try:
@@ -1777,13 +1957,11 @@ class TelegramSpyBot:
             
             keyboard_buttons = [
                 [
-                    {"text": "📊 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}"},
-                ],
-                [
                     {"text": "🔍 Поиск по конкретному юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
                 ],
                 [
-                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"}
+                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"},
+                    {"text": "🔄 Обновить", "callback_data": f"show_replies:{user_id}"}
                 ]
             ]
             
@@ -2049,10 +2227,10 @@ class TelegramSpyBot:
             print(f"Ошибка поиска реплаев пользователя: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка поиска: {str(e)[:100]}")
     
-    async def show_all_user_replies(self, chat_id: int, user_id: int):
-        """Показывает все реплаи пользователя и анализирует кому он чаще всего реплаит"""
+    async def search_friends(self, chat_id: int, user_id: int):
+        """Ищет всех людей, которым пользователь реплаил (друзей)"""
         try:
-            await self.send_bot_message(chat_id, "🔍 Собираю данные о всех реплаях пользователя...")
+            await self.send_bot_message(chat_id, "🔍 Собираю данные о всех людях, которым пользователь реплаил...")
             
             # Создаем прогресс сообщение
             progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю сбор... 📊 0%")
@@ -2127,31 +2305,36 @@ class TelegramSpyBot:
                                         sender_name = getattr(original_sender, 'first_name', '')
                                         if hasattr(original_sender, 'last_name') and original_sender.last_name:
                                             sender_name += f" {original_sender.last_name}"
-                                        if hasattr(original_sender, 'username') and original_sender.username:
-                                            sender_name += f" (@{original_sender.username})"
                                         
-                                        # Формируем ссылки
-                                        reply_link = await self.get_message_link(chat, message.id)
-                                        original_link = await self.get_message_link(chat, original_msg.id)
-                                        chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
+                                        username = ""
+                                        if hasattr(original_sender, 'username') and original_sender.username:
+                                            username = f"@{original_sender.username}"
+                                        
+                                        # Формируем ключ для пользователя
+                                        if username:
+                                            user_key = username
+                                        else:
+                                            user_key = f"{original_sender.id}"
                                         
                                         # Добавляем в статистику
-                                        if original_sender.id not in user_stats:
-                                            user_stats[original_sender.id] = {
+                                        if user_key not in user_stats:
+                                            user_stats[user_key] = {
                                                 "name": sender_name or f"User {original_sender.id}",
+                                                "username": username,
+                                                "user_id": original_sender.id,
                                                 "count": 0,
                                                 "replies": [],
                                                 "last_reply": message.date
                                             }
                                         
-                                        user_stats[original_sender.id]["count"] += 1
-                                        user_stats[original_sender.id]["replies"].append({
-                                            "chat": chat_name,
+                                        user_stats[user_key]["count"] += 1
+                                        user_stats[user_key]["replies"].append({
+                                            "chat": getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}')),
                                             "original_text": original_msg.text[:100] if original_msg.text else "без текста",
                                             "reply_text": message.text[:100] if message.text else "без текста",
                                             "reply_time": message.date.strftime("%d.%m.%Y %H:%M"),
-                                            "reply_link": reply_link,
-                                            "original_link": original_link,
+                                            "reply_link": await self.get_message_link(chat, message.id),
+                                            "original_link": await self.get_message_link(chat, original_msg.id),
                                             "chat_id": chat.id,
                                             "message_id": original_msg.id,
                                             "reply_id": message.id
@@ -2172,14 +2355,14 @@ class TelegramSpyBot:
                 await asyncio.sleep(0.05)
             
             # Сортируем пользователей по количеству реплаев
-            sorted_users = sorted(user_stats.items(), key=lambda x: x[1]["count"], reverse=True)
+            sorted_users = sorted(user_stats.values(), key=lambda x: x["count"], reverse=True)
             
             # Формируем итоговый отчет
             if sorted_users:
                 user_name = user.first_name if hasattr(user, 'first_name') else f"User {user_id}"
                 
                 total_text = (
-                    f"✅ <b>АНАЛИЗ РЕПЛАЕВ ЗАВЕРШЁН!</b>\n\n"
+                    f"✅ <b>ПОИСК ДРУЗЕЙ ЗАВЕРШЁН!</b>\n\n"
                     f"👤 Пользователь: {user_name}\n"
                     f"🆔 ID: <code>{user_id}</code>\n"
                     f"📊 Всего реплаев: {total_replies:,}\n"
@@ -2187,44 +2370,27 @@ class TelegramSpyBot:
                     f"📁 Всего чатов в списке: {len(chats)}\n"
                     f"✅ Проверено чатов: {checked_chats}\n"
                     f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
-                    f"🏆 <b>Топ пользователей по реплаям:</b>\n"
+                    f"<b>👥 ЛЮДИ КОТОРЫМ ПОЛЬЗОВАТЕЛЬ РЕПЛАИЛ:</b>\n\n"
                 )
                 
-                # Добавляем топ пользователей
-                for i, (target_id, stats) in enumerate(sorted_users[:10], 1):
-                    percentage = (stats["count"] / total_replies * 100) if total_replies > 0 else 0
-                    total_text += f"{i}. {stats['name']} - {stats['count']:,} реплаев ({percentage:.1f}%)\n"
+                # Добавляем пользователей в формате @username количество_реплаев
+                for i, stats in enumerate(sorted_users[:20], 1):
+                    username_display = stats['username'] if stats['username'] else f"ID: {stats['user_id']}"
+                    total_text += f"<b>{username_display}</b> {stats['count']} реплаев\n"
                 
-                # Если есть еще пользователи
-                if len(sorted_users) > 10:
-                    total_text += f"... и еще {len(sorted_users) - 10} пользователей\n"
+                if len(sorted_users) > 20:
+                    total_text += f"\n<i>... и еще {len(sorted_users) - 20} пользователей</i>\n"
                 
-                total_text += f"\n<i>Нажмите на пользователя чтобы увидеть детали реплаев</i>"
-                
-                # Создаем клавиатуру
-                keyboard_buttons = []
-                
-                # Кнопки для топ пользователей (первые 5)
-                for i, (target_id, stats) in enumerate(sorted_users[:5]):
-                    keyboard_buttons.append([
-                        {"text": f"👤 {stats['name'][:15]} - {stats['count']}", 
-                         "callback_data": f"view_reply_details:{user_id}:{target_id}"}
-                    ])
-                
-                # Если есть больше 5 пользователей, показываем кнопку "Показать еще"
-                if len(sorted_users) > 5:
-                    keyboard_buttons.append([
-                        {"text": f"📄 Показать еще {len(sorted_users) - 5} пользователей", 
-                         "callback_data": f"show_more_reply_users:{user_id}"}
-                    ])
-                
-                # Кнопки управления
-                keyboard_buttons.append([
-                    {"text": "🔍 Поиск по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
-                    {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
-                ])
-                
-                keyboard = self.create_keyboard(keyboard_buttons)
+                # Сохраняем найденных друзей в профиль пользователя
+                if user_id in self.monitored_users:
+                    # Формируем список друзей в формате @username количество_реплаев
+                    friends_list = []
+                    for stats in sorted_users[:50]:  # Сохраняем топ 50
+                        username_display = stats['username'] if stats['username'] else f"ID: {stats['user_id']}"
+                        friends_list.append(f"{username_display} {stats['count']} реплаев")
+                    
+                    self.monitored_users[user_id].friends = friends_list
+                    self.save_monitored_users()
                 
             else:
                 total_text = (
@@ -2235,18 +2401,21 @@ class TelegramSpyBot:
                     f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
                     f"<i>Пользователь не реплаил никому в указанных чатах</i>"
                 )
-                
-                keyboard = self.create_keyboard([
-                    [
-                        {"text": "🔍 Поиск по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
-                        {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
-                    ]
-                ])
+            
+            keyboard = self.create_keyboard([
+                [
+                    {"text": "🔍 Поиск по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
+                    {"text": "📊 Профиль", "callback_data": f"user_info:{user_id}"}
+                ],
+                [
+                    {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
+                ]
+            ])
             
             await self.send_bot_message(chat_id, total_text, keyboard)
             
         except Exception as e:
-            print(f"Ошибка анализа реплаев: {e}")
+            print(f"Ошибка поиска друзей: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
     
     async def show_reply_details_for_user(self, chat_id: int, user_id: int, target_user_id: int):
@@ -2375,9 +2544,6 @@ class TelegramSpyBot:
                 keyboard_buttons = [
                     [
                         {"text": "🔍 Новый поиск", "callback_data": f"search_replies_to_specific:{user_id}"},
-                        {"text": "📊 Все реплаи", "callback_data": f"all_user_replies:{user_id}"}
-                    ],
-                    [
                         {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
                     ]
                 ]
@@ -2395,9 +2561,6 @@ class TelegramSpyBot:
                 keyboard_buttons = [
                     [
                         {"text": "🔍 Новый поиск", "callback_data": f"search_replies_to_specific:{user_id}"},
-                        {"text": "📊 Все реплаи", "callback_data": f"all_user_replies:{user_id}"}
-                    ],
-                    [
                         {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
                     ]
                 ]
@@ -2423,7 +2586,7 @@ class TelegramSpyBot:
             
             keyboard_buttons = [
                 [
-                    {"text": "🔍 Найти людей которым реплаил", "callback_data": f"all_user_replies:{user_id}"},
+                    {"text": "🔍 Поиск друзей (все реплаи)", "callback_data": f"search_friends:{user_id}"},
                 ],
                 [
                     {"text": "🔍 Поиск по конкретному юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
@@ -2433,7 +2596,8 @@ class TelegramSpyBot:
                     {"text": "📊 Профиль", "callback_data": f"user_info:{user_id}"}
                 ],
                 [
-                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"}
+                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"},
+                    {"text": "🔄 Обновить", "callback_data": f"track_friends:{user_id}"}
                 ]
             ]
             
@@ -2536,8 +2700,9 @@ class TelegramSpyBot:
         for user_id, profile in users_list:
             name = profile.first_name[:15] or f"User {user_id}"
             status_msg = "📨" if profile.is_tracking_messages else ""
+            status_ava = "🖼" if profile.is_tracking_avatar else ""
             status_rep = "💬" if profile.is_tracking_replies else ""
-            status = f"{status_msg}{status_rep}"
+            status = f"{status_msg}{status_ava}{status_rep}"
             
             buttons.append([
                 {"text": f"👤 {name} {status}", "callback_data": f"user_info:{user_id}"}
@@ -2563,12 +2728,14 @@ class TelegramSpyBot:
         
         # Считаем пользователей с отслеживанием
         tracking_msg = sum(1 for u in self.monitored_users.values() if u.is_tracking_messages)
+        tracking_ava = sum(1 for u in self.monitored_users.values() if u.is_tracking_avatar)
         tracking_rep = sum(1 for u in self.monitored_users.values() if u.is_tracking_replies)
         
         stats_text = (
             f"📊 <b>СТАТИСТИКА БОТА:</b>\n\n"
             f"👥 Пользователей в кэше: {len(self.monitored_users)}\n"
             f"📨 Отслеживается сообщений: {tracking_msg}\n"
+            f"🖼 Отслеживается аватарок: {tracking_ava}\n"
             f"💬 Отслеживается ответов: {tracking_rep}\n"
             f"🔄 Активных задач мониторинга: {active_tasks}\n"
             f"📸 Аватарок в кэше: {len(self.avatar_cache)}\n"
@@ -2761,13 +2928,12 @@ class TelegramSpyBot:
     async def run(self):
         """Основной метод запуска"""
         print("="*60)
-        print("🤖 TELEGRAM SPY BOT v4.0")
+        print("🤖 TELEGRAM SPY BOT v3.5")
         print("="*60)
         print("✨ Улучшенная версия:")
-        print("• 📊 Анализ всех реплаев пользователя")
+        print("• 📊 Поиск всех друзей (кому реплаил пользователь)")
         print("• 🔍 Поиск реплаев по конкретному пользователю")
-        print("• 📈 Статистика кому чаще всего реплаит")
-        print("• 👥 Анализ друзей (люди которым реплаил)")
+        print("• 📈 Отображение друзей в формате @username количество_реплаев")
         print("• ⚡ Убраны старые ненужные функции")
         print("="*60)
         
@@ -2784,11 +2950,10 @@ class TelegramSpyBot:
             f"👤 Аккаунт: {self.current_user.first_name if self.current_user else 'Неизвестно'}\n"
             f"🆔 ID: {self.current_user.id if self.current_user else 'Неизвестно'}\n"
             f"🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            f"✨ <b>Улучшенная версия 4.0:</b>\n"
-            f"• 📊 Анализ всех реплаев пользователя\n"
+            f"✨ <b>Улучшенная версия 3.5:</b>\n"
+            f"• 📊 Поиск всех друзей (кому реплаил пользователь)\n"
             f"• 🔍 Поиск реплаев по конкретному пользователю\n"
-            f"• 📈 Статистика кому чаще всего реплаит\n"
-            f"• 👥 Анализ друзей (люди которым реплаил)\n"
+            f"• 📈 Отображение друзей в формате @username количество_реплаев\n"
             f"• ⚡ Убраны старые ненужные функции\n\n"
             f"📝 Отправьте /start для начала работы"
         )
