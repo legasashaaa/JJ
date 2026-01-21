@@ -1,3 +1,5 @@
+[file name]: main15_2_fixed.py
+[file content begin]
 import asyncio
 import os
 import sys
@@ -461,51 +463,7 @@ class TelegramSpyBot:
             
             elif action == "all_user_replies":
                 user_id = int(parts[1])
-                page = int(parts[2]) if len(parts) > 2 else 0
-                
-                # Проверяем есть ли кэшированные данные
-                if (user_id in self.reply_data_cache and 
-                    "all_replies_stats" in self.reply_data_cache[user_id]):
-                    
-                    cached_data = self.reply_data_cache[user_id]["all_replies_stats"]
-                    # Проверяем актуальность кэша (не старше 1 часа)
-                    cache_age = datetime.now() - cached_data["generated_at"]
-                    if cache_age.total_seconds() < 3600:  # 1 час
-                        user_stats = cached_data["user_stats"]
-                        total_replies = cached_data["total_replies"]
-                        
-                        # Сортируем пользователей
-                        sorted_users = sorted(user_stats.items(), key=lambda x: x[1]["count"], reverse=True)
-                        
-                        # Показываем страницу
-                        await self.show_all_user_replies_page(chat_id, user_id, sorted_users, total_replies, page)
-                    else:
-                        # Кэш устарел, запускаем поиск заново
-                        await self.show_all_user_replies(chat_id, user_id, page)
-                else:
-                    # Нет кэша, запускаем поиск
-                    await self.show_all_user_replies(chat_id, user_id, page)
-            
-            elif action == "all_user_replies_page":
-                user_id = int(parts[1])
-                page = int(parts[2])
-                
-                # Проверяем есть ли кэшированные данные
-                if (user_id in self.reply_data_cache and 
-                    "all_replies_stats" in self.reply_data_cache[user_id]):
-                    
-                    cached_data = self.reply_data_cache[user_id]["all_replies_stats"]
-                    user_stats = cached_data["user_stats"]
-                    total_replies = cached_data["total_replies"]
-                    
-                    # Сортируем пользователей
-                    sorted_users = sorted(user_stats.items(), key=lambda x: x[1]["count"], reverse=True)
-                    
-                    # Показываем страницу
-                    await self.show_all_user_replies_page(chat_id, user_id, sorted_users, total_replies, page)
-                else:
-                    # Если нет кэша, запускаем поиск заново
-                    await self.show_all_user_replies(chat_id, user_id, page)
+                await self.show_all_user_replies(chat_id, user_id)
             
             elif action == "search_replies_to_specific":
                 user_id = int(parts[1])
@@ -879,9 +837,6 @@ class TelegramSpyBot:
                     {"text": "📁 Показать все чаты", "callback_data": f"show_user_chats:{user_id}:0"}
                 ],
                 [
-                    {"text": "💬 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}:0"}
-                ],
-                [
                     {"text": "🔄 Обновить", "callback_data": f"refresh_status:{user_id}"},
                     {"text": "🔄 Обновить чаты", "callback_data": f"refresh_chats:{user_id}"}
                 ]
@@ -1017,9 +972,6 @@ class TelegramSpyBot:
                 [
                     {"text": "📸 Получить аватарку", "callback_data": f"get_avatar:{user_id}"},
                     {"text": "🔄 Обновить", "callback_data": f"refresh_status:{user_id}"}
-                ],
-                [
-                    {"text": "💬 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}:0"}
                 ],
                 [
                     {"text": "📁 Загрузить чаты пользователя", "callback_data": f"refresh_chats:{user_id}"}
@@ -1908,7 +1860,7 @@ class TelegramSpyBot:
                                 if not message or message.date <= last_check:
                                     continue
                                 
-                                # Получаем последний известный ID сообщения для этого чат
+                                # Получаем последний известный ID сообщения для этого чата
                                 last_msg_id = self.last_message_ids[user_id].get(chat.id, 0)
                                 
                                 # Если это новое сообщение
@@ -2003,7 +1955,7 @@ class TelegramSpyBot:
             
             keyboard_buttons = [
                 [
-                    {"text": "📊 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}:0"},
+                    {"text": "📊 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}"},
                 ],
                 [
                     {"text": "🔍 Поиск по конкретному юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
@@ -2276,15 +2228,17 @@ class TelegramSpyBot:
             print(f"Ошибка поиска реплаев пользователя: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка поиска: {str(e)[:100]}")
     
-    async def show_all_user_replies(self, chat_id: int, user_id: int, page: int = 0):
-        """Показывает все реплаи пользователя и анализирует кому он чаще всего реплаит с пагинацией"""
+    async def show_all_user_replies(self, chat_id: int, user_id: int):
+        """Показывает все реплаи пользователя и анализирует кому он чаще всего реплаит"""
         try:
             await self.send_bot_message(chat_id, "🔍 Собираю данные о всех реплаях пользователя...")
             
-            # Создаем прогресс сообщение
-            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю сбор... 📊 0%")
+            # Создаем прогресс сообщение сразу
             last_update = time.time()
             start_time = time.time()
+            
+            # Отправляем начальное сообщение
+            progress_msg = await self.send_bot_message(chat_id, "📊 Начинаю сбор... 📊 0%\n📁 Загружаю список чатов...")
             
             # Получаем нашего пользователя
             try:
@@ -2309,21 +2263,39 @@ class TelegramSpyBot:
             user_stats = {}
             total_replies = 0
             checked_chats = 0
+            batch_size = 5  # Обрабатываем по 5 чатов за раз
+            
+            # Промежуточный отчет - отправляем информацию о топ пользователях каждые 20 чатов
+            intermediate_report_interval = 20
             
             # Ищем в каждом чате
             for i, chat_identifier in enumerate(chats, 1):
                 try:
                     # Обновляем прогресс
                     current_time = time.time()
-                    if current_time - last_update > 5 or i % 5 == 0:
+                    if current_time - last_update > 5 or i % batch_size == 0:
                         progress = (i / len(chats)) * 100
                         emoji_progress = self.get_progress_emoji(progress)
-                        await self.send_bot_message(chat_id, 
+                        
+                        # Формируем сообщение с текущей статистикой
+                        stats_message = (
                             f"🔍 Собираю реплаи... {emoji_progress} {progress:.1f}%\n"
                             f"📁 Обработано: {i}/{len(chats)} чатов\n"
                             f"💬 Найдено реплаев: {total_replies}\n"
                             f"👥 Уникальных пользователей: {len(user_stats)}\n"
-                            f"✅ Чатов проверено: {checked_chats}")
+                            f"✅ Чатов проверено: {checked_chats}"
+                        )
+                        
+                        # Добавляем информацию о топ пользователях если есть
+                        if user_stats:
+                            # Сортируем и берем топ 3
+                            sorted_users_temp = sorted(user_stats.items(), key=lambda x: x[1]["count"], reverse=True)
+                            if sorted_users_temp:
+                                stats_message += f"\n\n🏆 <b>Текущий топ пользователей:</b>"
+                                for idx, (target_id, stats) in enumerate(sorted_users_temp[:3], 1):
+                                    stats_message += f"\n{idx}. {stats['name'][:20]} - {stats['count']} реплаев"
+                        
+                        await self.send_bot_message(chat_id, stats_message)
                         last_update = current_time
                     
                     # Получаем чат
@@ -2333,201 +2305,163 @@ class TelegramSpyBot:
                     
                     checked_chats += 1
                     
-                    # Получаем сообщения нашего пользователя (БЕЗ ЛИМИТА)
-                    async for message in self.client.iter_messages(
-                        chat,
-                        from_user=user
-                    ):
-                        if message and message.reply_to:
-                            try:
-                                # Получаем оригинальное сообщение
-                                try:
-                                    original_msg = await self.client.get_messages(
-                                        chat,
-                                        ids=message.reply_to.reply_to_msg_id
-                                    )
-                                    
-                                    if original_msg and hasattr(original_msg, 'from_id') and original_msg.from_id:
-                                        original_sender = await self.client.get_entity(original_msg.from_id)
-                                        
-                                        # Получаем информацию об авторе
-                                        sender_name = getattr(original_sender, 'first_name', '')
-                                        if hasattr(original_sender, 'last_name') and original_sender.last_name:
-                                            sender_name += f" {original_sender.last_name}"
-                                        
-                                        username = ""
-                                        if hasattr(original_sender, 'username') and original_sender.username:
-                                            username = f"@{original_sender.username}"
-                                        
-                                        # Формируем полное имя
-                                        full_name = sender_name.strip()
-                                        if username:
-                                            full_name = f"{full_name} {username}"
-                                        
-                                        if not full_name.strip():
-                                            full_name = f"User {original_sender.id}"
-                                        
-                                        # Формируем ссылки
-                                        reply_link = await self.get_message_link(chat, message.id)
-                                        original_link = await self.get_message_link(chat, original_msg.id)
-                                        chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
-                                        
-                                        # Добавляем в статистику
-                                        if original_sender.id not in user_stats:
-                                            user_stats[original_sender.id] = {
-                                                "name": full_name,
-                                                "username": username if username else f"id{original_sender.id}",
-                                                "user_id": original_sender.id,
-                                                "count": 0,
-                                                "replies": [],
-                                                "last_reply": message.date
-                                            }
-                                        
-                                        user_stats[original_sender.id]["count"] += 1
-                                        user_stats[original_sender.id]["replies"].append({
-                                            "chat": chat_name,
-                                            "original_text": original_msg.text[:100] if original_msg.text else "без текста",
-                                            "reply_text": message.text[:100] if message.text else "без текста",
-                                            "reply_time": message.date.strftime("%d.%m.%Y %H:%M"),
-                                            "reply_link": reply_link,
-                                            "original_link": original_link,
-                                            "chat_id": chat.id,
-                                            "message_id": original_msg.id,
-                                            "reply_id": message.id
-                                        })
-                                        
-                                        total_replies += 1
-                                        
-                                except:
+                    # Оптимизация: собираем ID всех сообщений с реплаями сначала
+                    reply_message_ids = []
+                    
+                    # Получаем сообщения нашего пользователя с реплаями
+                    try:
+                        async for message in self.client.iter_messages(
+                            chat,
+                            from_user=user,
+                            limit=1000  # Лимит для оптимизации
+                        ):
+                            if message and message.reply_to:
+                                reply_message_ids.append((message.id, message.reply_to.reply_to_msg_id))
+                    except:
+                        continue
+                    
+                    # Обрабатываем реплаи пачками
+                    for message_id, reply_to_id in reply_message_ids:
+                        try:
+                            # Получаем оригинальное сообщение
+                            original_msg = await self.client.get_messages(
+                                chat,
+                                ids=reply_to_id
+                            )
+                            
+                            if original_msg and hasattr(original_msg, 'from_id') and original_msg.from_id:
+                                # Получаем сообщение нашего пользователя
+                                user_message = await self.client.get_messages(
+                                    chat,
+                                    ids=message_id
+                                )
+                                
+                                if not user_message:
                                     continue
                                     
-                            except:
-                                continue
-                
+                                original_sender = await self.client.get_entity(original_msg.from_id)
+                                
+                                # Получаем информацию об авторе
+                                sender_name = getattr(original_sender, 'first_name', '')
+                                if hasattr(original_sender, 'last_name') and original_sender.last_name:
+                                    sender_name += f" {original_sender.last_name}"
+                                if hasattr(original_sender, 'username') and original_sender.username:
+                                    sender_name += f" (@{original_sender.username})"
+                                
+                                # Формируем ссылки
+                                reply_link = await self.get_message_link(chat, message_id)
+                                original_link = await self.get_message_link(chat, original_msg.id)
+                                chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
+                                
+                                # Добавляем в статистику
+                                if original_sender.id not in user_stats:
+                                    user_stats[original_sender.id] = {
+                                        "name": sender_name or f"User {original_sender.id}",
+                                        "count": 0,
+                                        "replies": [],
+                                        "last_reply": user_message.date
+                                    }
+                                
+                                user_stats[original_sender.id]["count"] += 1
+                                user_stats[original_sender.id]["replies"].append({
+                                    "chat": chat_name,
+                                    "original_text": original_msg.text[:100] if original_msg.text else "без текста",
+                                    "reply_text": user_message.text[:100] if user_message.text else "без текста",
+                                    "reply_time": user_message.date.strftime("%d.%m.%Y %H:%M"),
+                                    "reply_link": reply_link,
+                                    "original_link": original_link,
+                                    "chat_id": chat.id,
+                                    "message_id": original_msg.id,
+                                    "reply_id": message_id
+                                })
+                                
+                                total_replies += 1
+                                
+                        except:
+                            continue
+                    
                 except Exception as e:
                     continue
-            
-                # Пауза между чатами
-                await asyncio.sleep(0.05)
-        
-            # Сохраняем результаты в кэше
-            if user_id not in self.reply_data_cache:
-                self.reply_data_cache[user_id] = {}
-            
-            self.reply_data_cache[user_id]["all_replies_stats"] = {
-                "user_stats": user_stats,
-                "total_replies": total_replies,
-                "generated_at": datetime.now()
-            }
+                
+                # Небольшая пауза чтобы не спамить
+                await asyncio.sleep(0.1)
             
             # Сортируем пользователей по количеству реплаев
             sorted_users = sorted(user_stats.items(), key=lambda x: x[1]["count"], reverse=True)
             
-            # Показываем результаты с пагинацией
-            await self.show_all_user_replies_page(chat_id, user_id, sorted_users, total_replies, page, checked_chats, start_time)
-        
-        except Exception as e:
-            print(f"Ошибка анализа реплаев: {e}")
-            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
-    
-    async def show_all_user_replies_page(self, chat_id: int, user_id: int, sorted_users: list, 
-                                         total_replies: int, page: int = 0, checked_chats: int = 0, 
-                                         start_time: float = None):
-        """Показывает одну страницу со списком всех пользователей, кому реплаил"""
-        try:
-            # Получаем нашего пользователя
-            try:
-                user = await self.client.get_entity(PeerUser(user_id))
-            except:
-                user = await self.client.get_entity(user_id)
-            
-            user_name = user.first_name if hasattr(user, 'first_name') else f"User {user_id}"
-            
-            # Настройки пагинации
-            users_per_page = 15
-            total_pages = (len(sorted_users) + users_per_page - 1) // users_per_page
-            
-            if page >= total_pages:
-                page = total_pages - 1
-            
-            start_idx = page * users_per_page
-            end_idx = min((page + 1) * users_per_page, len(sorted_users))
-            
-            # Формируем заголовок
-            total_text = (
-                f"✅ <b>АНАЛИЗ РЕПЛАЕВ ЗАВЕРШЁН!</b>\n\n"
-                f"👤 Пользователь: {user_name}\n"
-                f"🆔 ID: <code>{user_id}</code>\n"
-                f"📊 Всего реплаев: {total_replies:,}\n"
-                f"👥 Всего пользователям: {len(sorted_users)}\n"
-                f"📁 Проверено чатов: {checked_chats}\n"
-            )
-            
-            if start_time:
-                total_text += f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
-            else:
-                total_text += "\n"
-            
-            total_text += f"🏆 <b>Топ пользователей по реплаям (страница {page + 1}/{total_pages}):</b>\n\n"
-            
-            # Добавляем пользователей текущей страницы
-            for i, (target_id, stats) in enumerate(sorted_users[start_idx:end_idx], start_idx + 1):
-                percentage = (stats["count"] / total_replies * 100) if total_replies > 0 else 0
+            # Формируем итоговый отчет
+            if sorted_users:
+                user_name = user.first_name if hasattr(user, 'first_name') else f"User {user_id}"
                 
-                # Форматируем имя пользователя
-                display_name = stats["name"]
-                if len(display_name) > 30:
-                    display_name = display_name[:27] + "..."
+                total_text = (
+                    f"✅ <b>АНАЛИЗ РЕПЛАЕВ ЗАВЕРШЁН!</b>\n\n"
+                    f"👤 Пользователь: {user_name}\n"
+                    f"🆔 ID: <code>{user_id}</code>\n"
+                    f"📊 Всего реплаев: {total_replies:,}\n"
+                    f"👥 Всего пользователям: {len(sorted_users)}\n"
+                    f"📁 Всего чатов в списке: {len(chats)}\n"
+                    f"✅ Проверено чатов: {checked_chats}\n"
+                    f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
+                    f"🏆 <b>Топ пользователей по реплаям:</b>\n"
+                )
                 
-                total_text += f"<b>{i}.</b> {display_name}\n"
-                total_text += f"   📊 {stats['count']:,} реплаев ({percentage:.1f}%)\n"
+                # Добавляем топ пользователей
+                for i, (target_id, stats) in enumerate(sorted_users[:10], 1):
+                    percentage = (stats["count"] / total_replies * 100) if total_replies > 0 else 0
+                    total_text += f"{i}. {stats['name']} - {stats['count']:,} реплаев ({percentage:.1f}%)\n"
                 
-                # Добавляем кнопку для просмотра деталей
-                if stats["user_id"]:
-                    total_text += f"   👁 <a href='tg://user?id={stats['user_id']}'>Перейти</a>\n"
+                # Если есть еще пользователи
+                if len(sorted_users) > 10:
+                    total_text += f"... и еще {len(sorted_users) - 10} пользователей\n"
                 
-                total_text += "\n"
-            
-            # Создаем клавиатуру с пагинацией
-            keyboard_buttons = []
-            
-            # Кнопки навигации
-            nav_buttons = []
-            if page > 0:
-                nav_buttons.append({"text": "⬅️ Назад", "callback_data": f"all_user_replies_page:{user_id}:{page-1}"})
-            
-            nav_buttons.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": f"noop"})
-            
-            if page < total_pages - 1:
-                nav_buttons.append({"text": "Вперёд ➡️", "callback_data": f"all_user_replies_page:{user_id}:{page+1}"})
-            
-            if nav_buttons:
-                keyboard_buttons.append(nav_buttons)
-            
-            # Кнопки деталей для первых 5 пользователей на странице
-            for i, (target_id, stats) in enumerate(sorted_users[start_idx:min(start_idx+5, end_idx)]):
-                short_name = stats["name"][:12] + "..." if len(stats["name"]) > 12 else stats["name"]
+                total_text += f"\n<i>Нажмите на пользователя чтобы увидеть детали реплаев</i>"
+                
+                # Создаем клавиатуру
+                keyboard_buttons = []
+                
+                # Кнопки для топ пользователей (первые 5)
+                for i, (target_id, stats) in enumerate(sorted_users[:5]):
+                    keyboard_buttons.append([
+                        {"text": f"👤 {stats['name'][:15]} - {stats['count']}", 
+                         "callback_data": f"view_reply_details:{user_id}:{target_id}"}
+                    ])
+                
+                # Если есть больше 5 пользователей, показываем кнопку "Показать еще"
+                if len(sorted_users) > 5:
+                    keyboard_buttons.append([
+                        {"text": f"📄 Показать еще {len(sorted_users) - 5} пользователей", 
+                         "callback_data": f"show_more_reply_users:{user_id}"}
+                    ])
+                
+                # Кнопки управления
                 keyboard_buttons.append([
-                    {"text": f"👤 {short_name} - {stats['count']}", 
-                     "callback_data": f"view_reply_details:{user_id}:{target_id}"}
+                    {"text": "🔍 Поиск по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
+                    {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
+                ])
+                
+                keyboard = self.create_keyboard(keyboard_buttons)
+                
+            else:
+                total_text = (
+                    f"❌ <b>Реплаев не найдено</b>\n\n"
+                    f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
+                    f"📁 Всего чатов в списке: {len(chats)}\n"
+                    f"✅ Проверено чатов: {checked_chats}\n"
+                    f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
+                    f"<i>Пользователь не реплаил никому в указанных чатах</i>"
+                )
+                
+                keyboard = self.create_keyboard([
+                    [
+                        {"text": "🔍 Поиск по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
+                        {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
+                    ]
                 ])
             
-            # Кнопки управления
-            keyboard_buttons.append([
-                {"text": "🔍 Поиск по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
-                {"text": "🔄 Обновить", "callback_data": f"all_user_replies:{user_id}"}
-            ])
-            
-            keyboard_buttons.append([
-                {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
-            ])
-            
-            keyboard = self.create_keyboard(keyboard_buttons)
-            
             await self.send_bot_message(chat_id, total_text, keyboard)
-        
+            
         except Exception as e:
-            print(f"Ошибка показа страницы реплаев: {e}")
+            print(f"Ошибка анализа реплаев: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
     
     async def show_reply_details_for_user(self, chat_id: int, user_id: int, target_user_id: int):
@@ -2656,7 +2590,7 @@ class TelegramSpyBot:
                 keyboard_buttons = [
                     [
                         {"text": "🔍 Новый поиск", "callback_data": f"search_replies_to_specific:{user_id}"},
-                        {"text": "📊 Все реплаи", "callback_data": f"all_user_replies:{user_id}:0"}
+                        {"text": "📊 Все реплаи", "callback_data": f"all_user_replies:{user_id}"}
                     ],
                     [
                         {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
@@ -2676,7 +2610,7 @@ class TelegramSpyBot:
                 keyboard_buttons = [
                     [
                         {"text": "🔍 Новый поиск", "callback_data": f"search_replies_to_specific:{user_id}"},
-                        {"text": "📊 Все реплаи", "callback_data": f"all_user_replies:{user_id}:0"}
+                        {"text": "📊 Все реплаи", "callback_data": f"all_user_replies:{user_id}"}
                     ],
                     [
                         {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
@@ -2704,7 +2638,7 @@ class TelegramSpyBot:
             
             keyboard_buttons = [
                 [
-                    {"text": "📊 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}:0"},
+                    {"text": "📊 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}"},
                 ],
                 [
                     {"text": "🔍 Поиск реплаев по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
@@ -3148,3 +3082,4 @@ if __name__ == "__main__":
         print(f"\n❌ Фатальная ошибка: {e}")
         import traceback
         traceback.print_exc()
+[file content end]
