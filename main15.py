@@ -879,6 +879,9 @@ class TelegramSpyBot:
                     {"text": "📁 Показать все чаты", "callback_data": f"show_user_chats:{user_id}:0"}
                 ],
                 [
+                    {"text": "💬 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}:0"}
+                ],
+                [
                     {"text": "🔄 Обновить", "callback_data": f"refresh_status:{user_id}"},
                     {"text": "🔄 Обновить чаты", "callback_data": f"refresh_chats:{user_id}"}
                 ]
@@ -1005,7 +1008,7 @@ class TelegramSpyBot:
                 ],
                 [
                     {"text": f"{track_reply_status} Следить за ответами", "callback_data": f"monitor_replies:{user_id}"},
-                    {"text": "💬 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}:0"}
+                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"}
                 ],
                 [
                     {"text": "📊 Количество сообщений", "callback_data": f"get_message_count:{user_id}"},
@@ -1014,6 +1017,9 @@ class TelegramSpyBot:
                 [
                     {"text": "📸 Получить аватарку", "callback_data": f"get_avatar:{user_id}"},
                     {"text": "🔄 Обновить", "callback_data": f"refresh_status:{user_id}"}
+                ],
+                [
+                    {"text": "💬 Все реплаи пользователя", "callback_data": f"all_user_replies:{user_id}:0"}
                 ],
                 [
                     {"text": "📁 Загрузить чаты пользователя", "callback_data": f"refresh_chats:{user_id}"}
@@ -1902,7 +1908,7 @@ class TelegramSpyBot:
                                 if not message or message.date <= last_check:
                                     continue
                                 
-                                # Получаем последний известный ID сообщения для этого чата
+                                # Получаем последний известный ID сообщения для этого чат
                                 last_msg_id = self.last_message_ids[user_id].get(chat.id, 0)
                                 
                                 # Если это новое сообщение
@@ -2400,10 +2406,10 @@ class TelegramSpyBot:
                 
                 except Exception as e:
                     continue
-                
+            
                 # Пауза между чатами
                 await asyncio.sleep(0.05)
-            
+        
             # Сохраняем результаты в кэше
             if user_id not in self.reply_data_cache:
                 self.reply_data_cache[user_id] = {}
@@ -2419,11 +2425,11 @@ class TelegramSpyBot:
             
             # Показываем результаты с пагинацией
             await self.show_all_user_replies_page(chat_id, user_id, sorted_users, total_replies, page, checked_chats, start_time)
-            
+        
         except Exception as e:
             print(f"Ошибка анализа реплаев: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
-
+    
     async def show_all_user_replies_page(self, chat_id: int, user_id: int, sorted_users: list, 
                                          total_replies: int, page: int = 0, checked_chats: int = 0, 
                                          start_time: float = None):
@@ -2519,7 +2525,7 @@ class TelegramSpyBot:
             keyboard = self.create_keyboard(keyboard_buttons)
             
             await self.send_bot_message(chat_id, total_text, keyboard)
-            
+        
         except Exception as e:
             print(f"Ошибка показа страницы реплаев: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
