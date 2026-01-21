@@ -274,10 +274,12 @@ class TelegramSpyBot:
             if text.startswith("/start"):
                 welcome_msg = (
                     "👋 <b>Шпионский бот активирован!</b>\n\n"
-                    "🔍 <b>Основные функции:</b>\n"
+                    "🔍 <b>Новые функции:</b>\n"
                     "• Поиск сообщений пользователя\n"
                     "• Отслеживание новых сообщений\n"
-                    "• Отслеживание ответов на сообщения\n\n"
+                    "• Мониторинг аватарок (с отправкой фото)\n"
+                    "• Отслеживание ответов на сообщения\n"
+                    "• Анализ активности и друзей\n\n"
                     "📝 <b>Использование:</b>\n"
                     "Просто отправьте @username или ID пользователя\n\n"
                     "Пример: <code>@durov</code> или <code>123456789</code>"
@@ -303,7 +305,8 @@ class TelegramSpyBot:
                     "3. Выберите действие из меню\n\n"
                     "👁 <b>Отслеживание:</b>\n"
                     "• Сообщения - уведомления о новых сообщениях\n"
-                    "• Ответы - кто отвечает на сообщения пользователя"
+                    "• Ответы - кто отвечает на сообщения пользователя\n"
+                    "• Друзья - анализ социальных связей"
                 )
                 await self.send_bot_message(chat_id, help_msg)
             
@@ -415,9 +418,9 @@ class TelegramSpyBot:
                 user_id = int(parts[1])
                 await self.ask_search_text(chat_id, user_id)
             
-            elif action == "get_avatar":
+            elif action == "track_friends":
                 user_id = int(parts[1])
-                await self.send_current_avatar(chat_id, user_id)
+                await self.show_friends_menu(chat_id, user_id)
             
             elif action == "get_message_count":
                 user_id = int(parts[1])
@@ -438,10 +441,6 @@ class TelegramSpyBot:
                     "<code>@durov</code>\n"
                     "<code>123456789</code>"
                 )
-            
-            elif action == "refresh_status":
-                user_id = int(parts[1])
-                await self.show_user_actions(chat_id, user_id)
             
             elif action == "show_replies":
                 user_id = int(parts[1])
@@ -810,18 +809,15 @@ class TelegramSpyBot:
                     {"text": f"{track_reply_status} Следить за ответами", "callback_data": f"monitor_replies:{user_id}"}
                 ],
                 [
-                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"}
+                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"},
+                    {"text": "👥 Анализ друзей", "callback_data": f"track_friends:{user_id}"}
                 ],
                 [
                     {"text": "📊 Количество сообщений", "callback_data": f"get_message_count:{user_id}"},
-                ],
-                [
-                    {"text": "📸 Получить аватарку", "callback_data": f"get_avatar:{user_id}"},
                     {"text": "📁 Показать все чаты", "callback_data": f"show_user_chats:{user_id}:0"}
                 ],
                 [
-                    {"text": "🔄 Обновить", "callback_data": f"refresh_status:{user_id}"},
-                    {"text": "🔄 Обновить чаты", "callback_data": f"refresh_chats:{user_id}"}
+                    {"text": "📁 Загрузить чаты", "callback_data": f"refresh_chats:{user_id}"}
                 ]
             ]
             
@@ -895,7 +891,7 @@ class TelegramSpyBot:
             # Кнопки управления
             keyboard_buttons.append([
                 {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"},
-                {"text": "🔄 Обновить чаты", "callback_data": f"refresh_chats:{user_id}"}
+                {"text": "📁 Обновить чаты", "callback_data": f"refresh_chats:{user_id}"}
             ])
             
             keyboard = self.create_keyboard(keyboard_buttons)
@@ -944,14 +940,11 @@ class TelegramSpyBot:
                     {"text": f"{track_reply_status} Следить за ответами", "callback_data": f"monitor_replies:{user_id}"}
                 ],
                 [
-                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"}
+                    {"text": "💬 Анализ реплаев", "callback_data": f"show_replies:{user_id}"},
+                    {"text": "👥 Анализ друзей", "callback_data": f"track_friends:{user_id}"}
                 ],
                 [
-                    {"text": "📊 Количество сообщений", "callback_data": f"get_message_count:{user_id}"},
-                ],
-                [
-                    {"text": "📸 Получить аватарку", "callback_data": f"get_avatar:{user_id}"},
-                    {"text": "🔄 Обновить", "callback_data": f"refresh_status:{user_id}"}
+                    {"text": "📊 Количество сообщений", "callback_data": f"get_message_count:{user_id}"}
                 ],
                 [
                     {"text": "📁 Загрузить чаты пользователя", "callback_data": f"refresh_chats:{user_id}"}
@@ -1000,24 +993,6 @@ class TelegramSpyBot:
         except Exception as e:
             print(f"Ошибка получения аватарки: {e}")
             return None
-    
-    async def send_current_avatar(self, chat_id: int, user_id: int):
-        """Отправляет текущую аватарку пользователя"""
-        try:
-            await self.send_bot_message(chat_id, "📸 Загружаю аватарку...")
-            
-            avatar_bytes = await self.get_user_avatar_bytes(user_id)
-            
-            if avatar_bytes:
-                # Отправляем фото
-                caption = f"🖼 <b>Аватарка пользователя</b>\n🆔 ID: <code>{user_id}</code>\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-                await self.send_bot_message(chat_id, caption, photo=avatar_bytes)
-            else:
-                await self.send_bot_message(chat_id, "❌ У пользователя нет аватарки или не удалось загрузить")
-                
-        except Exception as e:
-            print(f"Ошибка отправки аватарки: {e}")
-            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
     
     async def get_user_last_seen(self, user) -> Optional[datetime]:
         """Получает время последнего посещения"""
@@ -1085,8 +1060,7 @@ class TelegramSpyBot:
             
             keyboard = self.create_keyboard([
                 [
-                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"},
-                    {"text": "🔄 Обновить", "callback_data": f"user_info:{user_id}"}
+                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"}
                 ]
             ])
             
@@ -1809,8 +1783,7 @@ class TelegramSpyBot:
                     {"text": "🔍 Поиск по конкретному юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
                 ],
                 [
-                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"},
-                    {"text": "🔄 Обновить", "callback_data": f"show_replies:{user_id}"}
+                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"}
                 ]
             ]
             
@@ -2436,6 +2409,41 @@ class TelegramSpyBot:
             print(f"Ошибка показа деталей реплаев: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
     
+    async def show_friends_menu(self, chat_id: int, user_id: int):
+        """Показывает меню друзей"""
+        try:
+            user = await self.client.get_entity(PeerUser(user_id))
+            
+            menu_text = (
+                f"👥 <b>АНАЛИЗ СОЦИАЛЬНЫХ СВЯЗЕЙ</b>\n\n"
+                f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
+                f"🆔 ID: <code>{user_id}</code>\n\n"
+                f"<i>Выберите тип анализа:</i>"
+            )
+            
+            keyboard_buttons = [
+                [
+                    {"text": "🔍 Найти людей которым реплаил", "callback_data": f"all_user_replies:{user_id}"},
+                ],
+                [
+                    {"text": "🔍 Поиск по конкретному юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
+                ],
+                [
+                    {"text": "🔍 Найти сообщения", "callback_data": f"search_messages:{user_id}"},
+                    {"text": "📊 Профиль", "callback_data": f"user_info:{user_id}"}
+                ],
+                [
+                    {"text": "🔙 Назад", "callback_data": f"back_to_menu:{user_id}"}
+                ]
+            ]
+            
+            keyboard = self.create_keyboard(keyboard_buttons)
+            await self.send_bot_message(chat_id, menu_text, keyboard)
+            
+        except Exception as e:
+            print(f"Ошибка показа меню друзей: {e}")
+            await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
+    
     async def show_message_details(self, chat_id: int, message_chat_id: int, message_id: int):
         """Показывает детали сообщения"""
         try:
@@ -2753,12 +2761,13 @@ class TelegramSpyBot:
     async def run(self):
         """Основной метод запуска"""
         print("="*60)
-        print("🤖 TELEGRAM SPY BOT v3.5")
+        print("🤖 TELEGRAM SPY BOT v4.0")
         print("="*60)
         print("✨ Улучшенная версия:")
         print("• 📊 Анализ всех реплаев пользователя")
         print("• 🔍 Поиск реплаев по конкретному пользователю")
         print("• 📈 Статистика кому чаще всего реплаит")
+        print("• 👥 Анализ друзей (люди которым реплаил)")
         print("• ⚡ Убраны старые ненужные функции")
         print("="*60)
         
@@ -2775,10 +2784,11 @@ class TelegramSpyBot:
             f"👤 Аккаунт: {self.current_user.first_name if self.current_user else 'Неизвестно'}\n"
             f"🆔 ID: {self.current_user.id if self.current_user else 'Неизвестно'}\n"
             f"🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            f"✨ <b>Улучшенная версия 3.5:</b>\n"
+            f"✨ <b>Улучшенная версия 4.0:</b>\n"
             f"• 📊 Анализ всех реплаев пользователя\n"
             f"• 🔍 Поиск реплаев по конкретному пользователю\n"
             f"• 📈 Статистика кому чаще всего реплаит\n"
+            f"• 👥 Анализ друзей (люди которым реплаил)\n"
             f"• ⚡ Убраны старые ненужные функции\n\n"
             f"📝 Отправьте /start для начала работы"
         )
