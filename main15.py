@@ -84,6 +84,7 @@ class TelegramSpyBot:
         self.tracking_status: Dict[int, Dict[str, bool]] = {}  # Состояние отслеживания
         self.last_message_ids: Dict[int, Dict[int, int]] = {}  # Кэш последних сообщений по чатам {user_id: {chat_id: message_id}}
         self.reply_data_cache: Dict[int, Dict[str, List]] = {}  # Кэш для данных о реплаях {user_id: {"to_user": [], "from_user": []}}
+        self.collection_tasks: Dict[int, asyncio.Task] = {}  # Задачи сбора данных
         self.load_config()
         
     def load_config(self):
@@ -511,6 +512,10 @@ class TelegramSpyBot:
                 user_id = int(parts[1])
                 await self.load_user_chats(chat_id, user_id)
             
+            elif action == "cancel_collection":
+                user_id = int(parts[1])
+                await self.cancel_replies_collection(chat_id, user_id)
+            
             # Подтверждаем нажатие кнопки
             await self.answer_callback_query(callback_query["id"])
             
@@ -518,6 +523,15 @@ class TelegramSpyBot:
             print(f"Ошибка обработки callback: {e}")
             if 'callback_query' in locals():
                 await self.answer_callback_query(callback_query["id"])
+    
+    async def cancel_replies_collection(self, chat_id: int, user_id: int):
+        """Отменяет сбор реплаев"""
+        if user_id in self.collection_tasks:
+            task = self.collection_tasks[user_id]
+            if not task.done():
+                task.cancel()
+                del self.collection_tasks[user_id]
+                await self.send_bot_message(chat_id, "❌ Сбор данных отменен")
     
     async def answer_callback_query(self, query_id: str):
         """Отвечает на callback запрос"""
@@ -2525,16 +2539,10 @@ class TelegramSpyBot:
             print(f"Ошибка поиска ответов пользователя: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка поиска: {str(e)[:100]}")
     
-    async def collect_replies_data(self, user_id: int):
-        """Собирает данные о реплаях пользователя (с ограничениями для производительности)"""
+    async def collect_replies_data(self, user_id: int, limit_per_chat: int = 50, limit_messages: int = 30):
+        """Собирает данные о реплаях пользователя с ограничениями для производительности"""
         try:
-            # Если уже есть в кэше, возвращаем
-            if user_id in self.reply_data_cache:
-                print(f"📊 Использую кэшированные данные о реплаях для {user_id}")
-                return self.reply_data_cache[user_id]
-            
             user = await self.client.get_entity(PeerUser(user_id))
-            user_name = user.first_name if hasattr(user, 'first_name') else f"User {user_id}"
             
             # Загружаем список чатов (все из файла)
             chat_identifiers = await self.load_chats_list()
@@ -2546,102 +2554,85 @@ class TelegramSpyBot:
             replies_from_user = []  # Кому отвечает пользователь
             
             # Ограничиваем количество чатов для производительности
-            chat_identifiers = chat_identifiers[:15]
-            
-            await self.send_bot_message(ADMIN_ID, 
-                f"🔍 Начинаю сбор данных о реплаях для пользователя {user_name} (ID: {user_id})\n"
-                f"📁 Всего чатов для проверки: {len(chat_identifiers)}\n"
-                f"⏰ Начало: {datetime.now().strftime('%H:%M:%S')}"
-            )
+            chat_identifiers = chat_identifiers[:20]  # Уменьшили с 15 до 20 чатов
             
             for i, chat_identifier in enumerate(chat_identifiers, 1):
                 try:
-                    # Отправляем прогресс каждые 3 чата
-                    if i % 3 == 0:
-                        progress = (i / len(chat_identifiers)) * 100
-                        emoji_progress = self.get_progress_emoji(progress)
-                        await self.send_bot_message(ADMIN_ID, 
-                            f"🔍 Собираю данные о реплаях... {emoji_progress} {progress:.1f}%\n"
-                            f"📁 Обработано: {i}/{len(chat_identifiers)} чатов\n"
-                            f"💬 Ответов нашему пользователю: {len(replies_to_user)}\n"
-                            f"👤 Ответов от нашего пользователя: {len(replies_from_user)}"
-                        )
-                    
                     # Получаем чат
                     chat = await self.get_chat_by_identifier(chat_identifier)
                     if not chat:
                         continue
                     
+                    # Пропускаем приватные чаты если их много
+                    if hasattr(chat, 'participants_count') and chat.participants_count > 100000:
+                        continue
+                    
                     # Получаем сообщения пользователя (С ЛИМИТОМ для производительности)
                     user_messages = []
-                    try:
-                        async for message in self.client.iter_messages(
-                            chat,
-                            from_user=user,
-                            limit=100  # Ограничиваем количество сообщений
-                        ):
-                            if message:
-                                user_messages.append(message)
-                    except:
-                        continue
+                    async for message in self.client.iter_messages(
+                        chat,
+                        from_user=user,
+                        limit=limit_messages  # Ограничиваем количество сообщений
+                    ):
+                        if message:
+                            user_messages.append(message)
+                        # Пауза между получением сообщений
+                        await asyncio.sleep(0.01)
                     
                     # Проверяем кто отвечает на сообщения пользователя
                     for user_msg in user_messages:
                         try:
                             # Получаем ответы на это сообщение (С ЛИМИТОМ)
-                            try:
-                                async for reply in self.client.iter_messages(
-                                    chat,
-                                    min_id=user_msg.id - 1,
-                                    limit=20  # Ограничиваем количество проверяемых ответов
-                                ):
-                                    if (reply and reply.reply_to and 
-                                        reply.reply_to.reply_to_msg_id == user_msg.id and
-                                        hasattr(reply, 'from_id') and reply.from_id):
+                            async for reply in self.client.iter_messages(
+                                chat,
+                                min_id=user_msg.id - 1,
+                                limit=10  # Уменьшили с 20 до 10 ответов
+                            ):
+                                if (reply and reply.reply_to and 
+                                    reply.reply_to.reply_to_msg_id == user_msg.id and
+                                    hasattr(reply, 'from_id') and reply.from_id):
+                                    
+                                    try:
+                                        reply_sender = await self.client.get_entity(reply.from_id)
+                                        sender_name = getattr(reply_sender, 'first_name', '')
+                                        if hasattr(reply_sender, 'last_name') and reply_sender.last_name:
+                                            sender_name += f" {reply_sender.last_name}"
+                                        if hasattr(reply_sender, 'username') and reply_sender.username:
+                                            sender_name += f" (@{reply_sender.username})"
                                         
-                                        try:
-                                            reply_sender = await self.client.get_entity(reply.from_id)
-                                            sender_name = getattr(reply_sender, 'first_name', '')
-                                            if hasattr(reply_sender, 'last_name') and reply_sender.last_name:
-                                                sender_name += f" {reply_sender.last_name}"
-                                            if hasattr(reply_sender, 'username') and reply_sender.username:
-                                                sender_name += f" (@{reply_sender.username})"
-                                            else:
-                                                sender_name = f"User {reply_sender.id}"
-                                            
-                                            # Формируем ссылки
-                                            reply_link = await self.get_message_link(chat, reply.id)
-                                            original_link = await self.get_message_link(chat, user_msg.id)
-                                            chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
-                                            
-                                            replies_to_user.append({
-                                                "replier_id": reply_sender.id,
-                                                "replier_name": sender_name,
-                                                "chat_name": chat_name,
-                                                "original_text": user_msg.text[:100] if user_msg.text else "без текста",
-                                                "reply_text": reply.text[:100] if reply.text else "без текста",
-                                                "reply_time": reply.date.strftime("%d.%m.%Y %H:%M"),
-                                                "reply_link": reply_link,
-                                                "original_link": original_link,
-                                                "chat_id": chat.id,
-                                                "message_id": user_msg.id,
-                                                "reply_id": reply.id
-                                            })
-                                        except Exception as e:
-                                            continue
-                                        break  # Нашел один ответ, можно перейти к следующему сообщению
+                                        # Формируем ссылки
+                                        reply_link = await self.get_message_link(chat, reply.id)
+                                        original_link = await self.get_message_link(chat, user_msg.id)
+                                        chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
                                         
-                            except:
-                                continue
-                            
+                                        replies_to_user.append({
+                                            "replier_id": reply_sender.id,
+                                            "replier_name": sender_name or "Неизвестный",
+                                            "chat_name": chat_name,
+                                            "original_text": user_msg.text[:80] if user_msg.text else "без текста",  # Укоротили текст
+                                            "reply_text": reply.text[:80] if reply.text else "без текста",
+                                            "reply_time": reply.date.strftime("%d.%m.%Y %H:%M"),
+                                            "reply_link": reply_link,
+                                            "original_link": original_link,
+                                            "chat_id": chat.id,
+                                            "message_id": user_msg.id,
+                                            "reply_id": reply.id
+                                        })
+                                    except:
+                                        continue
+                                    break  # Нашел один ответ, можно перейти к следующему сообщению
+                                    
                         except:
                             continue
+                        
+                        # Короткая пауза между сообщениями
+                        await asyncio.sleep(0.005)
                     
-                    # Проверяем кому отвечает пользователь
+                    # Проверяем кому отвечает пользователь (отдельный цикл для оптимизации)
                     async for message in self.client.iter_messages(
                         chat,
                         from_user=user,
-                        limit=100  # Ограничиваем количество сообщений
+                        limit=limit_messages  # Ограничиваем количество сообщений
                     ):
                         if message and message.reply_to:
                             try:
@@ -2653,48 +2644,46 @@ class TelegramSpyBot:
                                     )
                                     
                                     if original_msg and hasattr(original_msg, 'from_id') and original_msg.from_id:
-                                        try:
-                                            original_sender = await self.client.get_entity(original_msg.from_id)
-                                            sender_name = getattr(original_sender, 'first_name', '')
-                                            if hasattr(original_sender, 'last_name') and original_sender.last_name:
-                                                sender_name += f" {original_sender.last_name}"
-                                            if hasattr(original_sender, 'username') and original_sender.username:
-                                                sender_name += f" (@{original_sender.username})"
-                                            else:
-                                                sender_name = f"User {original_sender.id}"
-                                            
-                                            # Формируем ссылки
-                                            reply_link = await self.get_message_link(chat, message.id)
-                                            original_link = await self.get_message_link(chat, original_msg.id)
-                                            chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
-                                            
-                                            replies_from_user.append({
-                                                "replied_to_id": original_sender.id,
-                                                "replied_to_name": sender_name,
-                                                "chat_name": chat_name,
-                                                "original_text": original_msg.text[:100] if original_msg.text else "без текста",
-                                                "reply_text": message.text[:100] if message.text else "без текста",
-                                                "reply_time": message.date.strftime("%d.%m.%Y %H:%M"),
-                                                "reply_link": reply_link,
-                                                "original_link": original_link,
-                                                "chat_id": chat.id,
-                                                "message_id": original_msg.id,
-                                                "reply_id": message.id
-                                            })
-                                        except Exception as e:
-                                            continue
+                                        original_sender = await self.client.get_entity(original_msg.from_id)
+                                        sender_name = getattr(original_sender, 'first_name', '')
+                                        if hasattr(original_sender, 'last_name') and original_sender.last_name:
+                                            sender_name += f" {original_sender.last_name}"
+                                        if hasattr(original_sender, 'username') and original_sender.username:
+                                            sender_name += f" (@{original_sender.username})"
+                                        
+                                        # Формируем ссылки
+                                        reply_link = await self.get_message_link(chat, message.id)
+                                        original_link = await self.get_message_link(chat, original_msg.id)
+                                        chat_name = getattr(chat, 'title', getattr(chat, 'username', f'Чат {chat.id}'))
+                                        
+                                        replies_from_user.append({
+                                            "replied_to_id": original_sender.id,
+                                            "replied_to_name": sender_name or "Неизвестный",
+                                            "chat_name": chat_name,
+                                            "original_text": original_msg.text[:80] if original_msg.text else "без текста",
+                                            "reply_text": message.text[:80] if message.text else "без текста",
+                                            "reply_time": message.date.strftime("%d.%m.%Y %H:%M"),
+                                            "reply_link": reply_link,
+                                            "original_link": original_link,
+                                            "chat_id": chat.id,
+                                            "message_id": original_msg.id,
+                                            "reply_id": message.id
+                                        })
                                 except:
                                     continue
                                     
                             except:
                                 continue
+                        
+                        # Короткая пауза между сообщениями
+                        await asyncio.sleep(0.005)
                 
                 except Exception as e:
                     print(f"Ошибка обработки чата {chat_identifier}: {e}")
                     continue
                 
                 # Пауза между чатами
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.2)
             
             # Сохраняем в кэш
             self.reply_data_cache[user_id] = {
@@ -2702,42 +2691,51 @@ class TelegramSpyBot:
                 "from_user": replies_from_user
             }
             
-            # Отправляем финальный отчет
-            await self.send_bot_message(ADMIN_ID,
-                f"✅ <b>Сбор данных о реплаях завершен!</b>\n\n"
-                f"👤 Пользователь: {user_name}\n"
-                f"🆔 ID: <code>{user_id}</code>\n\n"
-                f"📊 Результаты:\n"
-                f"• Ответов нашему пользователю: {len(replies_to_user)}\n"
-                f"• Ответов от нашего пользователя: {len(replies_from_user)}\n"
-                f"• Проверено чатов: {len(chat_identifiers)}\n"
-                f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}"
-            )
-            
             return self.reply_data_cache[user_id]
             
         except Exception as e:
             print(f"Ошибка сбора данных о реплаях: {e}")
-            await self.send_bot_message(ADMIN_ID, f"❌ Ошибка сбора данных о реплаях: {str(e)[:200]}")
             return {"to_user": [], "from_user": []}
     
     async def show_replies_to_user(self, chat_id: int, user_id: int, page: int = 0):
         """Показывает кто отвечает пользователю"""
         try:
-            await self.send_bot_message(chat_id, "🔍 Собираю данные о том, кто отвечает пользователю... Это может занять некоторое время.")
+            # Отправляем начальное сообщение
+            initial_msg = "🔍 Собираю данные о том, кто отвечает пользователю... Это может занять некоторое время."
+            await self.send_bot_message(chat_id, initial_msg)
+            
+            # Создаем задачу сбора данных
+            task = asyncio.create_task(self.collect_replies_data(user_id, limit_messages=30))
+            self.collection_tasks[user_id] = task
             
             # Получаем данные о реплаях (с ограничениями для производительности)
-            reply_data = await self.collect_replies_data(user_id)
+            reply_data = await task
+            
+            # Удаляем задачу после завершения
+            if user_id in self.collection_tasks:
+                del self.collection_tasks[user_id]
+            
             replies_to_user = reply_data["to_user"]
             
+            # Показываем промежуточные результаты
             if not replies_to_user:
                 await self.send_bot_message(chat_id,
                     f"❌ <b>Ответов не найдено</b>\n\n"
                     f"👤 Пользователь: <code>{user_id}</code>\n"
-                    f"⏳ Проверено: последние сообщения\n\n"
+                    f"⏳ Проверено: 30 сообщений в каждом чате\n\n"
                     "Никто не отвечал на сообщения пользователя в проверенных чатах."
                 )
                 return
+            
+            # Ограничиваем количество реплаев для отображения
+            max_replies_to_display = 200  # Максимальное количество реплаев для обработки
+            if len(replies_to_user) > max_replies_to_display:
+                replies_to_user = replies_to_user[:max_replies_to_display]
+                await self.send_bot_message(chat_id, 
+                    f"⚠️ <b>Ограничение отображения</b>\n\n"
+                    f"Найдено {len(reply_data['to_user']):,} ответов, но покажу только первые {max_replies_to_display} "
+                    f"для производительности."
+                )
             
             # Группируем по пользователям
             user_stats = {}
@@ -2771,7 +2769,7 @@ class TelegramSpyBot:
                 f"👤 Пользователь: <code>{user_id}</code>\n"
                 f"📊 Всего отвечавших: {len(sorted_users)}\n"
                 f"💬 Всего ответов: {len(replies_to_user):,}\n"
-                f"⏳ Проверено: последние 100 сообщений в каждом чате\n\n"
+                f"⏳ Проверено: 30 сообщений в каждом чате\n\n"
                 f"<i>Страница {page + 1} из {total_pages}</i>\n\n"
             )
             
@@ -2786,8 +2784,6 @@ class TelegramSpyBot:
             nav_buttons = []
             if page > 0:
                 nav_buttons.append({"text": "⬅️ Назад", "callback_data": f"replies_to_user:{user_id}:{page-1}"})
-            
-            nav_buttons.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": f"noop"})
             
             if page < total_pages - 1:
                 nav_buttons.append({"text": "Вперёд ➡️", "callback_data": f"replies_to_user:{user_id}:{page+1}"})
@@ -2810,6 +2806,8 @@ class TelegramSpyBot:
             keyboard = self.create_keyboard(keyboard_buttons)
             await self.send_bot_message(chat_id, message_text, keyboard)
             
+        except asyncio.CancelledError:
+            await self.send_bot_message(chat_id, "❌ Сбор данных отменен")
         except Exception as e:
             print(f"Ошибка показа ответов пользователю: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
@@ -2817,20 +2815,41 @@ class TelegramSpyBot:
     async def show_replies_from_user(self, chat_id: int, user_id: int, page: int = 0):
         """Показывает кому отвечает пользователь"""
         try:
+            # Отправляем начальное сообщение
             await self.send_bot_message(chat_id, "🔍 Собираю данные о том, кому отвечает пользователь... Это может занять некоторое время.")
             
+            # Создаем задачу сбора данных
+            task = asyncio.create_task(self.collect_replies_data(user_id, limit_messages=30))
+            self.collection_tasks[user_id] = task
+            
             # Получаем данные о реплаях (с ограничениями для производительности)
-            reply_data = await self.collect_replies_data(user_id)
+            reply_data = await task
+            
+            # Удаляем задачу после завершения
+            if user_id in self.collection_tasks:
+                del self.collection_tasks[user_id]
+            
             replies_from_user = reply_data["from_user"]
             
+            # Показываем промежуточные результаты
             if not replies_from_user:
                 await self.send_bot_message(chat_id,
                     f"❌ <b>Ответов не найдено</b>\n\n"
                     f"👤 Пользователь: <code>{user_id}</code>\n"
-                    f"⏳ Проверено: последние сообщения\n\n"
+                    f"⏳ Проверено: 30 сообщений в каждом чате\n\n"
                     "Пользователь никому не отвечал в проверенных чатах."
                 )
                 return
+            
+            # Ограничиваем количество реплаев для отображения
+            max_replies_to_display = 200  # Максимальное количество реплаев для обработки
+            if len(replies_from_user) > max_replies_to_display:
+                replies_from_user = replies_from_user[:max_replies_to_display]
+                await self.send_bot_message(chat_id, 
+                    f"⚠️ <b>Ограничение отображения</b>\n\n"
+                    f"Найдено {len(reply_data['from_user']):,} ответов, но покажу только первые {max_replies_to_display} "
+                    f"для производительности."
+                )
             
             # Группируем по пользователям
             user_stats = {}
@@ -2864,7 +2883,7 @@ class TelegramSpyBot:
                 f"👤 Пользователь: <code>{user_id}</code>\n"
                 f"📊 Всего собеседников: {len(sorted_users)}\n"
                 f"💬 Всего ответов: {len(replies_from_user):,}\n"
-                f"⏳ Проверено: последние 100 сообщений в каждом чате\n\n"
+                f"⏳ Проверено: 30 сообщений в каждом чате\n\n"
                 f"<i>Страница {page + 1} из {total_pages}</i>\n\n"
             )
             
@@ -2879,8 +2898,6 @@ class TelegramSpyBot:
             nav_buttons = []
             if page > 0:
                 nav_buttons.append({"text": "⬅️ Назад", "callback_data": f"replies_from_user:{user_id}:{page-1}"})
-            
-            nav_buttons.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": f"noop"})
             
             if page < total_pages - 1:
                 nav_buttons.append({"text": "Вперёд ➡️", "callback_data": f"replies_from_user:{user_id}:{page+1}"})
@@ -2903,6 +2920,8 @@ class TelegramSpyBot:
             keyboard = self.create_keyboard(keyboard_buttons)
             await self.send_bot_message(chat_id, message_text, keyboard)
             
+        except asyncio.CancelledError:
+            await self.send_bot_message(chat_id, "❌ Сбор данных отменен")
         except Exception as e:
             print(f"Ошибка показа ответов от пользователя: {e}")
             await self.send_bot_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
@@ -3443,10 +3462,10 @@ class TelegramSpyBot:
         print("🤖 TELEGRAM SPY BOT v3.5")
         print("="*60)
         print("✨ Улучшенная версия:")
-        print("• Исправлен поиск реплаев пользователя")
-        print("• Добавлены username пользователей в результатах")
-        print("• Улучшен прогресс сбора данных")
-        print("• Исправлены ошибки получения информации о пользователях")
+        print("• Оптимизирован сбор реплаев для производительности")
+        print("• Добавлены лимиты для предотвращения зависания")
+        print("• Добавлены асинхронные паузы между запросами")
+        print("• Добавлена возможность отмены сбора данных")
         print("="*60)
         
         # Подключаемся к Telegram
@@ -3462,12 +3481,12 @@ class TelegramSpyBot:
             f"👤 Аккаунт: {self.current_user.first_name if self.current_user else 'Неизвестно'}\n"
             f"🆔 ID: {self.current_user.id if self.current_user else 'Неизвестно'}\n"
             f"🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            f"✨ <b>Исправленная версия:</b>\n"
-            f"• 🔍 Исправлен поиск реплаев пользователя\n"
-            f"• 👤 Добавлены username пользователей в результатах\n"
-            f"• 📊 Улучшен прогресс сбора данных\n"
-            f"• 🛡️ Исправлены ошибки получения информации\n"
-            f"• 💬 Теперь показывается кто кому отвечает\n\n"
+            f"✨ <b>Оптимизированная версия:</b>\n"
+            f"• 🚀 Исправлено зависание при сборе реплаев\n"
+            f"• ⚡ Улучшена производительность с лимитами\n"
+            f"• 🕐 Добавлены асинхронные паузы\n"
+            f"• ❌ Добавлена отмена сбора данных\n"
+            f"• 📊 Ограничено количество отображаемых реплаев\n\n"
             f"📝 Отправьте /start для начала работы"
         )
         
