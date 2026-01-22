@@ -2325,16 +2325,15 @@ class TelegramSpyBot:
         """Показывает все реплаи пользователя и анализирует кому он чаще всего реплаит"""
         try:
             # Отправляем начальное сообщение
-            initial_msg = await self.send_bot_message(chat_id, "🔍 Собираю данные о всех реплаях пользователя...\n📊 Начинаю сбор... 0%")
-            last_progress_msg_time = time.time()
-            last_progress_msg_id = None
-            progress_messages_sent = 0
+            await self.send_bot_message(chat_id, "🔍 Собираю данные о всех реплаях пользователя...\n📊 Начинаю сбор...")
             
             # Получаем нашего пользователя
             try:
                 user = await self.client.get_entity(PeerUser(user_id))
+                user_name = user.first_name if hasattr(user, 'first_name') else f"User {user_id}"
             except:
-                user = await self.client.get_entity(user_id)
+                user_name = f"User {user_id}"
+                user = None
             
             # Загружаем список чатов (все из файла)
             chats = await self.load_chats_list()
@@ -2354,106 +2353,90 @@ class TelegramSpyBot:
             total_replies = 0
             checked_chats = 0
             start_time = time.time()
+            last_update_time = time.time()
             
             # Кэш для ускорения получения информации о пользователях
             user_info_cache = {}
             
-            # Переменные для контроля обновлений
-            progress_update_interval = 3  # секунды
-            last_user_count_shown = 0
+            # Переменные для контроля пагинации
+            users_displayed_count = 0  # Сколько пользователей уже показано
+            progress_message_ids = []  # ID сообщений с прогрессом
             
             # Ищем в каждом чате
             for i, chat_identifier in enumerate(chats, 1):
                 try:
-                    # Проверяем, нужно ли обновлять прогресс
+                    # Обновляем прогресс каждые 3 секунды или каждые 5 чатов
                     current_time = time.time()
-                    should_update = False
+                    should_update = current_time - last_update_time > 3 or i % 5 == 0 or i == len(chats)
                     
-                    # Условия для обновления прогресса:
-                    # 1. Прошло время с последнего обновления
-                    # 2. Первый чат
-                    # 3. Последний чат
-                    # 4. Каждый 5-й чат
-                    # 5. Найдено много реплаев (каждые 25)
-                    if (current_time - last_progress_msg_time > progress_update_interval or 
-                        i == 1 or 
-                        i == len(chats) or 
-                        i % 5 == 0 or
-                        (total_replies > 0 and total_replies % 25 == 0) or
-                        len(user_stats) >= last_user_count_shown + 10):  # Показываем каждые 10 новых пользователей
-                        
-                        should_update = True
-                    
-                    # ОБНОВЛЕНИЕ: Показываем пользователей по 10 в сообщении
                     if should_update:
                         progress = (i / len(chats)) * 100
                         emoji_progress = self.get_progress_emoji(progress)
                         
-                        # Формируем текст прогресса
+                        # Формируем базовую информацию о прогрессе
                         progress_text = (
-                            f"🔍 <b>СБОР РЕПЛАЕВ ПОЛЬЗОВАТЕЛЯ</b>\n\n"
-                            f"📊 Прогресс: {emoji_progress} {progress:.1f}%\n"
-                            f"📁 Обработано: <code>{i}/{len(chats)}</code> чатов\n"
-                            f"💬 Найдено реплаев: <code>{total_replies:,}</code>\n"
-                            f"👥 Уникальных пользователей: <code>{len(user_stats):,}</code>\n"
-                            f"✅ Чатов проверено: <code>{checked_chats}</code>\n"
-                            f"⏱ Время работы: <code>{time.time() - start_time:.1f}</code> сек\n"
+                            f"🔍 <b>Собираю реплаи...</b> {emoji_progress} <b>{progress:.1f}%</b>\n\n"
+                            f"📁 Обработано: {i}/{len(chats)} чатов\n"
+                            f"💬 Найдено реплаев: {total_replies}\n"
+                            f"👥 Уникальных пользователей: {len(user_stats)}\n"
+                            f"✅ Чатов проверено: {checked_chats}\n"
                         )
                         
-                        # Если есть статистика, показываем пользователей по группам
+                        # Если нашли пользователей, показываем их постранично
                         if user_stats:
-                            # Сортируем по количеству реплаев
+                            # Сортируем пользователей по количеству реплаев
                             sorted_users_current = sorted(user_stats.items(), key=lambda x: x[1]["count"], reverse=True)
                             
-                            # Определяем сколько пользователей показывать
-                            users_to_show_start = last_user_count_shown
-                            users_to_show_end = min(last_user_count_shown + 10, len(sorted_users_current))
+                            # Определяем сколько пользователей еще не показывали
+                            remaining_users = sorted_users_current[users_displayed_count:]
                             
-                            if users_to_show_start < users_to_show_end:
-                                progress_text += f"\n\n📋 <b>ПОЛЬЗОВАТЕЛИ {users_to_show_start+1}-{users_to_show_end} из {len(sorted_users_current)}:</b>\n"
+                            if remaining_users:
+                                # Показываем по 10 пользователей за раз
+                                users_to_show = remaining_users[:10]
                                 
-                                users_to_show = sorted_users_current[users_to_show_start:users_to_show_end]
+                                progress_text += f"\n📊 <b>Найденные пользователи (показаны {users_displayed_count + 1}-{users_displayed_count + len(users_to_show)} из {len(sorted_users_current)}):</b>\n\n"
                                 
-                                for idx, (target_id, stats) in enumerate(users_to_show, users_to_show_start + 1):
-                                    # Получаем процент реплаев
-                                    percentage = (stats["count"] / total_replies * 100) if total_replies > 0 else 0
+                                for idx, (target_id, stats) in enumerate(users_to_show, users_displayed_count + 1):
+                                    # Форматируем имя пользователя
+                                    name_display = stats['name']
+                                    if len(name_display) > 25:
+                                        name_display = name_display[:22] + "..."
                                     
-                                    # Формируем имя пользователя
-                                    if not stats['name'].strip():
-                                        display_name = f"👤 User {target_id}"
-                                    else:
-                                        # Обрезаем длинные имена
-                                        name_display = stats['name'][:25] + "..." if len(stats['name']) > 25 else stats['name']
-                                        display_name = f"👤 {name_display}"
+                                    # Определяем отображаемый ID
+                                    display_id = f"@{stats.get('username', '')}" if stats.get('username') else f"ID: {target_id}"
                                     
-                                    # Добавляем ID если нет юзернейма или если имя слишком короткое
-                                    if not stats['name'] or len(stats['name'].strip()) < 3:
-                                        display_name += f" (ID: <code>{target_id}</code>)"
-                                    
-                                    progress_text += f"{idx}. {display_name} - <b>{stats['count']:,}</b> реплаев ({percentage:.1f}%)\n"
+                                    progress_text += (
+                                        f"<b>{idx}.</b> {name_display}\n"
+                                        f"   <code>{display_id}</code>\n"
+                                        f"   📊 Реплаев: {stats['count']}\n"
+                                    )
                                 
-                                last_user_count_shown = users_to_show_end
+                                # Обновляем счетчик показанных пользователей
+                                users_displayed_count += len(users_to_show)
                                 
-                                # Если остались еще пользователи
-                                if len(sorted_users_current) > users_to_show_end:
-                                    progress_text += f"\n📄 <i>Осталось показать: {len(sorted_users_current) - users_to_show_end} пользователей</i>"
+                                # Если есть еще пользователи, добавляем информацию
+                                if users_displayed_count < len(sorted_users_current):
+                                    remaining_count = len(sorted_users_current) - users_displayed_count
+                                    progress_text += f"\n⏳ <i>Осталось показать: {remaining_count} пользователей...</i>\n"
+                            else:
+                                # Все пользователи уже показаны
+                                progress_text += f"\n✅ <b>Все {len(sorted_users_current)} пользователей показаны!</b>\n"
                         
-                        # Отправляем новое сообщение вместо обновления
+                        # Отправляем новое сообщение о прогрессе
                         msg_id = await self.send_bot_message_with_id(chat_id, progress_text)
                         if msg_id:
-                            # Удаляем предыдущее сообщение о прогрессе если было много сообщений
-                            if last_progress_msg_id and progress_messages_sent > 5:
+                            progress_message_ids.append(msg_id)
+                            
+                            # Ограничиваем количество сообщений в истории (не более 10)
+                            if len(progress_message_ids) > 10:
+                                old_msg_id = progress_message_ids.pop(0)
                                 try:
-                                    await self.delete_bot_message(chat_id, last_progress_msg_id)
+                                    await self.delete_bot_message(chat_id, old_msg_id)
                                 except:
                                     pass
-                                progress_messages_sent = 0
-                            
-                            last_progress_msg_id = msg_id
-                            progress_messages_sent += 1
                         
-                        last_progress_msg_time = current_time
-                
+                        last_update_time = current_time
+                    
                     # Получаем чат
                     chat = await self.get_chat_by_identifier(chat_identifier)
                     if not chat:
@@ -2499,17 +2482,25 @@ class TelegramSpyBot:
                                                 sender_name = getattr(original_sender, 'first_name', '')
                                                 if hasattr(original_sender, 'last_name') and original_sender.last_name:
                                                     sender_name += f" {original_sender.last_name}"
-                                                if hasattr(original_sender, 'username') and original_sender.username:
-                                                    sender_name += f" (@{original_sender.username})"
+                                                
+                                                username = getattr(original_sender, 'username', '')
                                                 
                                                 if not sender_name.strip():
                                                     sender_name = f"User {original_sender_id}"
                                                 
-                                                user_info_cache[original_sender_id] = sender_name
+                                                user_info_cache[original_sender_id] = {
+                                                    'name': sender_name,
+                                                    'username': username
+                                                }
                                             except:
-                                                user_info_cache[original_sender_id] = f"User {original_sender_id}"
+                                                user_info_cache[original_sender_id] = {
+                                                    'name': f"User {original_sender_id}",
+                                                    'username': ''
+                                                }
                                         
-                                        sender_name = user_info_cache[original_sender_id]
+                                        sender_info = user_info_cache[original_sender_id]
+                                        sender_name = sender_info['name']
+                                        username = sender_info['username']
                                         
                                         # Формируем ссылки
                                         reply_link = await self.get_message_link(chat, message.id)
@@ -2520,6 +2511,7 @@ class TelegramSpyBot:
                                         if original_sender_id not in user_stats:
                                             user_stats[original_sender_id] = {
                                                 "name": sender_name,
+                                                "username": username,
                                                 "count": 0,
                                                 "replies": [],
                                                 "last_reply": message.date
@@ -2565,24 +2557,24 @@ class TelegramSpyBot:
                 "collected_at": time.time()
             }
             
+            # Удаляем все сообщения о прогрессе
+            for msg_id in progress_message_ids:
+                try:
+                    await self.delete_bot_message(chat_id, msg_id)
+                except:
+                    pass
+            
             # Финальное сообщение о завершении сбора
             final_progress_text = (
                 f"✅ <b>СБОР ДАННЫХ ЗАВЕРШЁН!</b>\n\n"
-                f"📁 Всего обработано чатов: <code>{checked_chats}/{len(chats)}</code>\n"
-                f"💬 Всего найдено реплаев: <code>{total_replies:,}</code>\n"
-                f"👥 Уникальных пользователей: <code>{len(user_stats):,}</code>\n"
-                f"⏱ Время сбора: <code>{time.time() - start_time:.1f}</code> сек\n\n"
+                f"📁 Всего обработано чатов: {checked_chats}/{len(chats)}\n"
+                f"💬 Всего найдено реплаев: {total_replies:,}\n"
+                f"👥 Уникальных пользователей: {len(user_stats):,}\n"
+                f"⏱ Время сбора: {time.time() - start_time:.1f} сек\n\n"
                 f"📊 <b>Формирую полный отчет...</b>"
             )
             
-            try:
-                if last_progress_msg_id:
-                    await self.edit_bot_message(chat_id, last_progress_msg_id, final_progress_text)
-                else:
-                    await self.send_bot_message(chat_id, final_progress_text)
-            except:
-                await self.send_bot_message(chat_id, final_progress_text)
-            
+            await self.send_bot_message(chat_id, final_progress_text)
             await asyncio.sleep(1)  # Небольшая пауза перед показом результатов
             
             # Сортируем пользователей по количеству реплаев
@@ -2590,93 +2582,82 @@ class TelegramSpyBot:
             
             # Формируем итоговый отчет
             if sorted_users:
-                user_name = user.first_name if hasattr(user, 'first_name') else f"User {user_id}"
+                # Создаем подробный отчет со всеми пользователями
+                total_text = (
+                    f"✅ <b>ПОЛНЫЙ АНАЛИЗ РЕПЛАЕВ ЗАВЕРШЁН!</b>\n\n"
+                    f"👤 Пользователь: {user_name}\n"
+                    f"🆔 ID: <code>{user_id}</code>\n"
+                    f"📊 Всего реплаев: {total_replies:,}\n"
+                    f"👥 Всего пользователям: {len(sorted_users):,}\n"
+                    f"📁 Всего чатов в списке: {len(chats)}\n"
+                    f"✅ Проверено чатов: {checked_chats}\n"
+                    f"⏱ Общее время: {time.time() - start_time:.1f} сек\n\n"
+                )
                 
-                # Создаем подробный отчет со всеми пользователями (показываем по 20 в сообщении)
-                for start_idx in range(0, len(sorted_users), 20):
-                    end_idx = min(start_idx + 20, len(sorted_users))
-                    current_batch = sorted_users[start_idx:end_idx]
+                # Показываем топ-15 пользователей в сообщении
+                if len(sorted_users) > 0:
+                    total_text += f"🏆 <b>Топ-15 пользователей по реплаям:</b>\n\n"
                     
-                    total_text = (
-                        f"📊 <b>РЕПЛАИ ПОЛЬЗОВАТЕЛЯ</b>\n\n"
-                        f"👤 Пользователь: {user_name}\n"
-                        f"🆔 ID: <code>{user_id}</code>\n"
-                        f"💬 Всего реплаев: <code>{total_replies:,}</code>\n"
-                        f"👥 Всего пользователей: <code>{len(sorted_users):,}</code>\n"
-                        f"📁 Чатов проверено: <code>{checked_chats}/{len(chats)}</code>\n"
-                        f"⏱ Время анализа: <code>{time.time() - start_time:.1f}</code> сек\n\n"
-                    )
-                    
-                    # Заголовок для текущей группы
-                    if len(sorted_users) > 20:
-                        total_text += f"📋 <b>ПОЛЬЗОВАТЕЛИ {start_idx+1}-{end_idx} из {len(sorted_users)}:</b>\n\n"
-                    else:
-                        total_text += f"📋 <b>ВСЕ ПОЛЬЗОВАТЕЛИ:</b>\n\n"
-                    
-                    # Показываем пользователей текущей группы
-                    for i, (target_id, stats) in enumerate(current_batch, start_idx + 1):
-                        # Получаем процент реплаев
+                    for i, (target_id, stats) in enumerate(sorted_users[:15], 1):
                         percentage = (stats["count"] / total_replies * 100) if total_replies > 0 else 0
+                        # Обрезаем длинные имена
+                        name_display = stats['name'][:25] + "..." if len(stats['name']) > 25 else stats['name']
                         
-                        # Формируем красивое отображение пользователя
-                        if not stats['name'].strip() or stats['name'] == f"User {target_id}":
-                            display_name = f"👤 User <code>{target_id}</code>"
-                        else:
-                            # Обрезаем длинные имена
-                            name_display = stats['name'][:25] + "..." if len(stats['name']) > 25 else stats['name']
-                            display_name = f"👤 {name_display}"
-                            
-                            # Всегда добавляем ID для полноты информации
-                            display_name += f" (ID: <code>{target_id}</code>)"
+                        # Определяем отображаемый ID
+                        display_id = f"@{stats.get('username', '')}" if stats.get('username') else f"ID: {target_id}"
                         
-                        # Форматируем количество реплаев
-                        reply_count = f"<b>{stats['count']:,}</b>"
-                        
-                        total_text += f"{i}. {display_name} - {reply_count} реплаев ({percentage:.1f}%)\n"
+                        total_text += (
+                            f"<b>{i}.</b> {name_display}\n"
+                            f"   <code>{display_id}</code>\n"
+                            f"   📊 Реплаев: {stats['count']:,} ({percentage:.1f}%)\n\n"
+                        )
                     
-                    # Если это не последняя группа, добавляем указание
-                    if end_idx < len(sorted_users):
-                        total_text += f"\n📄 <i>Продолжение следует... ({len(sorted_users) - end_idx} пользователей осталось)</i>"
+                    # Если есть еще пользователи
+                    if len(sorted_users) > 15:
+                        remaining_count = len(sorted_users) - 15
+                        remaining_replies = sum(stats['count'] for _, stats in sorted_users[15:])
+                        total_text += f"📄 <i>... и еще {remaining_count:,} пользователей с {remaining_replies:,} реплаями</i>\n"
+                
+                total_text += f"\n📋 <b>Нажмите на пользователя чтобы увидеть детали реплаев</b>"
+                
+                # Создаем клавиатуру
+                keyboard_buttons = []
+                
+                # Кнопки для топ пользователей (первые 6, по 2 в строке)
+                for i in range(0, min(6, len(sorted_users)), 2):
+                    row = []
+                    for j in range(2):
+                        idx = i + j
+                        if idx < len(sorted_users) and idx < 6:
+                            target_id, stats = sorted_users[idx]
+                            short_name = stats['name'][:10] if len(stats['name']) > 10 else stats['name']
+                            row.append({
+                                "text": f"👤 {short_name} - {stats['count']}", 
+                                "callback_data": f"view_reply_details:{user_id}:{target_id}"
+                            })
                     
-                    keyboard_buttons = []
-                    
-                    # Кнопки для навигации если много пользователей
-                    if len(sorted_users) > 20:
-                        nav_buttons = []
-                        if start_idx > 0:
-                            nav_buttons.append({"text": "⬅️ Предыдущие", "callback_data": f"show_more_reply_users:{user_id}:{max(0, start_idx-20)}"})
-                        
-                        nav_buttons.append({"text": f"📄 {start_idx//20+1}/{(len(sorted_users)+19)//20}", "callback_data": f"noop"})
-                        
-                        if end_idx < len(sorted_users):
-                            nav_buttons.append({"text": "Следующие ➡️", "callback_data": f"show_more_reply_users:{user_id}:{end_idx}"})
-                        
-                        if nav_buttons:
-                            keyboard_buttons.append(nav_buttons)
-                    
-                    # Кнопки для экспорта и управления
+                    if row:
+                        keyboard_buttons.append(row)
+                
+                # Если есть больше 6 пользователей, добавляем кнопку для экспорта в файл
+                if len(sorted_users) > 0:
                     keyboard_buttons.append([
-                        {"text": "📁 Выгрузить файлом", "callback_data": f"export_reply_users:{user_id}"},
-                        {"text": "🔍 Поиск по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"}
+                        {"text": f"📁 Выгрузить файлом ({len(sorted_users)} пользователей)", 
+                         "callback_data": f"export_reply_users:{user_id}"}
                     ])
-                    
-                    keyboard_buttons.append([
-                        {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
-                    ])
-                    
-                    keyboard = self.create_keyboard(keyboard_buttons)
-                    
-                    # Отправляем сообщение для текущей группы
-                    await self.send_bot_message(chat_id, total_text, keyboard)
-                    
-                    # Пауза между сообщениями
-                    if end_idx < len(sorted_users):
-                        await asyncio.sleep(0.5)
+                
+                # Кнопки управления
+                keyboard_buttons.append([
+                    {"text": "🔍 Поиск по юзеру", "callback_data": f"search_replies_to_specific:{user_id}"},
+                    {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
+                ])
+                
+                keyboard = self.create_keyboard(keyboard_buttons)
                 
             else:
                 total_text = (
                     f"❌ <b>Реплаев не найдено</b>\n\n"
-                    f"👤 Пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
+                    f"👤 Пользователь: {user_name}\n"
                     f"📁 Всего чатов в списке: {len(chats)}\n"
                     f"✅ Проверено чатов: {checked_chats}\n"
                     f"⏱ Время выполнения: {time.time() - start_time:.1f} сек\n\n"
@@ -2689,16 +2670,9 @@ class TelegramSpyBot:
                         {"text": "🔙 В меню", "callback_data": f"back_to_menu:{user_id}"}
                     ]
                 ])
-                
-                # Удаляем последнее сообщение о прогрессе (если есть)
-                if last_progress_msg_id:
-                    try:
-                        await self.delete_bot_message(chat_id, last_progress_msg_id)
-                    except:
-                        pass
-                
-                # Отправляем финальный отчет
-                await self.send_bot_message(chat_id, total_text, keyboard)
+            
+            # Отправляем финальный отчет
+            await self.send_bot_message(chat_id, total_text, keyboard)
             
         except Exception as e:
             print(f"Ошибка анализа реплаев: {e}")
@@ -2743,14 +2717,9 @@ class TelegramSpyBot:
             for i, (target_id, stats) in enumerate(sorted_users, 1):
                 percentage = (stats["count"] / total_replies * 100) if total_replies > 0 else 0
                 
-                # Формируем имя для файла
-                if not stats['name'].strip() or stats['name'] == f"User {target_id}":
-                    name_for_file = f"User {target_id}"
-                else:
-                    name_for_file = stats['name']
-                
-                file_content += f"{i}. {name_for_file}\n"
+                file_content += f"{i}. {stats['name']}\n"
                 file_content += f"   ID: {target_id}\n"
+                file_content += f"   Username: {stats.get('username', '')}\n"
                 file_content += f"   Реплаев: {stats['count']:,} ({percentage:.1f}%)\n"
                 file_content += f"   Последний реплай: {stats['last_reply'].strftime('%d.%m.%Y %H:%M')}\n"
                 
@@ -2821,8 +2790,8 @@ class TelegramSpyBot:
             caption = (
                 f"📁 <b>Файл со списком пользователей</b>\n\n"
                 f"👤 Пользователь: ID <code>{user_id}</code>\n"
-                f"📊 Всего реплаев: <code>{total_replies:,}</code>\n"
-                f"👥 Всего пользователей: <code>{len(sorted_users):,}</code>\n"
+                f"📊 Всего реплаев: {total_replies:,}\n"
+                f"👥 Всего пользователей: {len(sorted_users):,}\n"
                 f"📅 Дата выгрузки: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
                 f"<i>Файл содержит полный список пользователей, которым реплаил целевой пользователь.</i>"
             )
@@ -2834,8 +2803,8 @@ class TelegramSpyBot:
                 f"✅ <b>Файл успешно выгружен!</b>\n\n"
                 f"📄 Имя файла: <code>{filename}</code>\n"
                 f"👤 Пользователь: ID <code>{user_id}</code>\n"
-                f"📊 Пользователей в файле: <code>{len(sorted_users):,}</code>\n"
-                f"💬 Всего реплаев: <code>{total_replies:,}</code>\n\n"
+                f"📊 Пользователей в файле: {len(sorted_users):,}\n"
+                f"💬 Всего реплаев: {total_replies:,}\n\n"
                 f"<i>Файл содержит подробную статистику по всем пользователям.</i>"
             )
             
@@ -2845,7 +2814,7 @@ class TelegramSpyBot:
             traceback.print_exc()
             await self.send_bot_message(chat_id, f"❌ Ошибка выгрузки: {str(e)[:200]}")
     
-    async def show_more_reply_users(self, chat_id: int, user_id: int, start_idx: int = 0):
+    async def show_more_reply_users(self, chat_id: int, user_id: int, start_idx: int = 6):
         """Показывает дополнительных пользователей из топа реплаев"""
         try:
             # Загружаем сохраненные данные из кэша
@@ -2873,46 +2842,40 @@ class TelegramSpyBot:
                 return
             
             # Определяем конец диапазона
-            end_idx = min(start_idx + 20, len(sorted_users))
+            end_idx = min(start_idx + 10, len(sorted_users))
             
             # Формируем сообщение
             message_text = (
-                f"📊 <b>РЕПЛАИ ПОЛЬЗОВАТЕЛЯ</b>\n\n"
-                f"👤 Пользователь: ID <code>{user_id}</code>\n"
-                f"👥 Всего пользователей: <code>{len(sorted_users):,}</code>\n"
-                f"💬 Всего реплаев: <code>{cache_data['total_replies']:,}</code>\n\n"
+                f"📄 <b>Пользователи {start_idx+1}-{end_idx} из {len(sorted_users)}</b>\n\n"
+                f"👤 Целевой пользователь: ID <code>{user_id}</code>\n"
+                f"👥 Всего пользователей: {len(sorted_users):,}\n\n"
             )
-            
-            # Добавляем заголовок для текущей группы
-            message_text += f"📋 <b>ПОЛЬЗОВАТЕЛИ {start_idx+1}-{end_idx} из {len(sorted_users)}:</b>\n\n"
             
             # Добавляем пользователей
             for i in range(start_idx, end_idx):
                 if i < len(sorted_users):
                     target_id, stats = sorted_users[i]
                     percentage = (stats["count"] / cache_data["total_replies"] * 100) if cache_data["total_replies"] > 0 else 0
+                    name_display = stats['name'][:30] + "..." if len(stats['name']) > 30 else stats['name']
                     
-                    # Формируем красивое отображение пользователя
-                    if not stats['name'].strip() or stats['name'] == f"User {target_id}":
-                        display_name = f"👤 User <code>{target_id}</code>"
-                    else:
-                        name_display = stats['name'][:25] + "..." if len(stats['name']) > 25 else stats['name']
-                        display_name = f"👤 {name_display}"
-                        
-                        # Всегда добавляем ID для полноты информации
-                        display_name += f" (ID: <code>{target_id}</code>)"
+                    # Определяем отображаемый ID
+                    display_id = f"@{stats.get('username', '')}" if stats.get('username') else f"ID: {target_id}"
                     
-                    message_text += f"{i+1}. {display_name} - <b>{stats['count']:,}</b> реплаев ({percentage:.1f}%)\n"
+                    message_text += (
+                        f"<b>{i+1}.</b> {name_display}\n"
+                        f"   <code>{display_id}</code>\n"
+                        f"   📊 Реплаев: {stats['count']} ({percentage:.1f}%)\n\n"
+                    )
             
             # Создаем кнопки для навигации
             keyboard_buttons = []
             
             # Кнопки навигации
             nav_buttons = []
-            if start_idx > 0:
-                nav_buttons.append({"text": "⬅️ Предыдущие", "callback_data": f"show_more_reply_users:{user_id}:{max(0, start_idx-20)}"})
+            if start_idx > 10:
+                nav_buttons.append({"text": "⬅️ Предыдущие", "callback_data": f"show_more_reply_users:{user_id}:{max(0, start_idx-10)}"})
             
-            nav_buttons.append({"text": f"📄 {start_idx//20+1}/{(len(sorted_users)+19)//20}", "callback_data": f"noop"})
+            nav_buttons.append({"text": f"📄 {start_idx//10+1}/{(len(sorted_users)+9)//10}", "callback_data": f"noop"})
             
             if end_idx < len(sorted_users):
                 nav_buttons.append({"text": "Следующие ➡️", "callback_data": f"show_more_reply_users:{user_id}:{end_idx}"})
@@ -2957,9 +2920,6 @@ class TelegramSpyBot:
                 target_name += f" {target_user.last_name}"
             if hasattr(target_user, 'username') and target_user.username:
                 target_name += f" (@{target_user.username})"
-            
-            if not target_name.strip():
-                target_name = f"User {target_user_id}"
             
             # Загружаем список чатов (все из файла)
             chats = await self.load_chats_list()
@@ -3041,11 +3001,10 @@ class TelegramSpyBot:
                 total_text = (
                     f"💬 <b>РЕПЛАИ НАШЕГО ПОЛЬЗОВАТЕЛЯ</b>\n\n"
                     f"👤 Наш пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
-                    f"🆔 ID нашего: <code>{user_id}</code>\n"
                     f"👥 Кому реплаил: {target_name}\n"
                     f"🆔 ID целевого: <code>{target_user_id}</code>\n"
-                    f"📊 Всего реплаев: <code>{len(found_replies):,}</code>\n"
-                    f"📁 Чатов проверено: <code>{checked_chats}</code>\n\n"
+                    f"📊 Всего реплаев: {len(found_replies):,}\n"
+                    f"📁 Чатов проверено: {checked_chats}\n\n"
                 )
                 
                 # Показываем первые 5 реплаев
@@ -3075,10 +3034,9 @@ class TelegramSpyBot:
                 total_text = (
                     f"❌ <b>Реплаев не найдено</b>\n\n"
                     f"👤 Наш пользователь: {user.first_name if hasattr(user, 'first_name') else 'ID: ' + str(user_id)}\n"
-                    f"🆔 ID нашего: <code>{user_id}</code>\n"
                     f"👥 Кому искали: {target_name}\n"
                     f"🆔 ID целевого: <code>{target_user_id}</code>\n"
-                    f"📁 Чатов проверено: <code>{checked_chats}</code>\n\n"
+                    f"📁 Чатов проверено: {checked_chats}\n\n"
                     f"<i>Пользователь не реплаил этому пользователю</i>"
                 )
                 
@@ -3215,8 +3173,8 @@ class TelegramSpyBot:
         
         menu_text = (
             f"👁 <b>ОТСЛЕЖИВАЕМЫЕ ПОЛЬЗОВАТЕЛИ:</b>\n\n"
-            f"📊 Всего в кэше: <code>{len(self.monitored_users)}</code>\n"
-            f"🔄 Активных задач: <code>{active_tasks}</code>\n\n"
+            f"📊 Всего в кэше: {len(self.monitored_users)}\n"
+            f"🔄 Активных задач: {active_tasks}\n\n"
             f"<i>Выберите пользователя:</i>"
         )
         
@@ -3260,13 +3218,13 @@ class TelegramSpyBot:
         
         stats_text = (
             f"📊 <b>СТАТИСТИКА БОТА:</b>\n\n"
-            f"👥 Пользователей в кэше: <code>{len(self.monitored_users)}</code>\n"
-            f"📨 Отслеживается сообщений: <code>{tracking_msg}</code>\n"
-            f"🖼 Отслеживается аватарок: <code>{tracking_ava}</code>\n"
-            f"💬 Отслеживается ответов: <code>{tracking_rep}</code>\n"
-            f"🔄 Активных задач мониторинга: <code>{active_tasks}</code>\n"
-            f"📸 Аватарок в кэше: <code>{len(self.avatar_cache)}</code>\n"
-            f"💾 Сохранено профилей: <code>{len(self.monitored_users)}</code>\n"
+            f"👥 Пользователей в кэше: {len(self.monitored_users)}\n"
+            f"📨 Отслеживается сообщений: {tracking_msg}\n"
+            f"🖼 Отслеживается аватарок: {tracking_ava}\n"
+            f"💬 Отслеживается ответов: {tracking_rep}\n"
+            f"🔄 Активных задач мониторинга: {active_tasks}\n"
+            f"📸 Аватарок в кэше: {len(self.avatar_cache)}\n"
+            f"💾 Сохранено профилей: {len(self.monitored_users)}\n"
             f"⏰ Время работы сервера: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
         )
         
@@ -3455,14 +3413,15 @@ class TelegramSpyBot:
     async def run(self):
         """Основной метод запуска"""
         print("="*60)
-        print("🤖 TELEGRAM SPY BOT v3.6")
+        print("🤖 TELEGRAM SPY BOT v3.7")
         print("="*60)
         print("✨ Улучшенная версия:")
         print("• 📊 Анализ всех реплаев пользователя")
         print("• 🔍 Поиск реплаев по конкретному пользователю")
         print("• 📈 Статистика кому чаще всего реплаит")
         print("• 📁 Выгрузка всех пользователей в файл")
-        print("• 👁 Показ всех пользователей при анализе")
+        print("• 👁 Показ ВСЕХ пользователей при анализе (по 10 за раз)")
+        print("• 🆔 Показ ID для пользователей без username")
         print("="*60)
         
         # Подключаемся к Telegram
@@ -3478,12 +3437,13 @@ class TelegramSpyBot:
             f"👤 Аккаунт: {self.current_user.first_name if self.current_user else 'Неизвестно'}\n"
             f"🆔 ID: {self.current_user.id if self.current_user else 'Неизвестно'}\n"
             f"🕐 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            f"✨ <b>Улучшенная версия 3.6:</b>\n"
+            f"✨ <b>Улучшенная версия 3.7:</b>\n"
             f"• 📊 Анализ всех реплаев пользователя\n"
             f"• 🔍 Поиск реплаев по конкретному пользователю\n"
             f"• 📈 Статистика кому чаще всего реплаит\n"
             f"• 📁 Выгрузка всех пользователей в файл\n"
-            f"• 👁 Показ всех пользователей при анализе\n\n"
+            f"• 👁 Показ ВСЕХ пользователей при анализе (по 10 за раз)\n"
+            f"• 🆔 Показ ID для пользователей без username\n\n"
             f"📝 Отправьте /start для начала работы"
         )
         
@@ -3559,4 +3519,3 @@ if __name__ == "__main__":
         print(f"\n❌ Фатальная ошибка: {e}")
         import traceback
         traceback.print_exc()
-[file content end]
