@@ -1,3 +1,5 @@
+[file name]: main19 3.py
+[file content begin]
 import asyncio
 import os
 import sys
@@ -19,7 +21,7 @@ from telethon.tl.types import (
     ChannelParticipantsRecent, InputPeerUser, InputPeerChannel,
     UserProfilePhoto, UserStatusRecently, UserStatusLastWeek,
     UserStatusLastMonth, UserStatusOffline, UserStatusOnline,
-    UserStatusEmpty, PhotoEmpty
+    UserStatusEmpty, UserStatusEmpty, PhotoEmpty
 )
 from telethon.tl import functions, types
 import aiohttp
@@ -382,7 +384,7 @@ class TelegramSpyBot:
                 help_msg = (
                     "📋 <b>Доступные команды:</b>\n\n"
                     "/start - Начать работу\n"
-                    "/monitor - Управление отслеживанием\n"
+                    "/monitor - Управление отслеживания\n"
                     "/stats - Статистика\n"
                     "/help - Помощь\n\n"
                     "📝 <b>Как использовать:</b>\n"
@@ -1953,7 +1955,7 @@ class TelegramSpyBot:
                                 if not message or message.date <= last_check:
                                     continue
                                 
-                                # Получаем последний известный ID сообщения для этого чат
+                                # Получаем последний известный ID сообщения для этого чата
                                 last_msg_id = self.last_message_ids[user_id].get(chat.id, 0)
                                 
                                 # Если это новое сообщение
@@ -3576,3 +3578,4 @@ if __name__ == "__main__":
         print(f"\n❌ Фатальная ошибка: {e}")
         import traceback
         traceback.print_exc()
+[file content end]
